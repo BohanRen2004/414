@@ -175,6 +175,7 @@ export const RULES_VERSION = '1.0.0' as const;
 ```gitignore
 # .gitignore
 .worktrees/
+.superpowers/
 node_modules/
 client/library/
 client/temp/
