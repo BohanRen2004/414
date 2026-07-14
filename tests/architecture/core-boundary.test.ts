@@ -24,9 +24,13 @@ function referencesCocos(source: string): boolean {
     if (
       (ts.isImportDeclaration(node) && isCocosSpecifier(node.moduleSpecifier)) ||
       (ts.isExportDeclaration(node) && isCocosSpecifier(node.moduleSpecifier)) ||
+      (ts.isImportTypeNode(node) &&
+        ts.isLiteralTypeNode(node.argument) &&
+        isCocosSpecifier(node.argument.literal)) ||
       (ts.isImportEqualsDeclaration(node) &&
         ts.isExternalModuleReference(node.moduleReference) &&
         isCocosSpecifier(node.moduleReference.expression)) ||
+      (ts.isJSDocImportTag(node) && isCocosSpecifier(node.moduleSpecifier)) ||
       (ts.isCallExpression(node) &&
         isCocosSpecifier(node.arguments[0]) &&
         (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
@@ -36,6 +40,9 @@ function referencesCocos(source: string): boolean {
       return;
     }
 
+    for (const jsDoc of ts.getJSDocCommentsAndTags(node)) {
+      visit(jsDoc);
+    }
     ts.forEachChild(node, visit);
   }
 
@@ -51,6 +58,9 @@ describe('Cocos module reference detection', () => {
     ['dynamic import call', `const cocos = import('cc');`],
     ['CommonJS require call', `const cocos = require('cc');`],
     ['import-equals declaration', `import cocos = require('cc');`],
+    ['inline import type', `type Component = import('cc').Component;`],
+    ['typeof inline import type', `type Module = typeof import('cc');`],
+    ['JSDoc import tag', `/** @import { Component } from 'cc' */\nexport {};`],
   ])('detects a %s', (_description, source) => {
     expect(referencesCocos(source)).toBe(true);
   });
@@ -59,6 +69,7 @@ describe('Cocos module reference detection', () => {
     [`const moduleName = 'cc';`],
     [`// import 'cc';\nexport const engine = 'custom';`],
     [`import { helper } from 'cc-helpers';`],
+    [`type Helper = import('cc-helpers').Helper;`],
   ])('does not flag harmless source: %s', (source) => {
     expect(referencesCocos(source)).toBe(false);
   });
