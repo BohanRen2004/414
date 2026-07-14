@@ -79,9 +79,9 @@ Rule files are split by responsibility. `reducer.ts` dispatches actions but dele
 **Interfaces:**
 - Produces: `RULES_VERSION: "1.0.0"`, root test commands, and the architectural rule that core cannot import Cocos.
 
-- [ ] **Step 1: Create the Cocos-compatible source tree**
+- [ ] **Step 1: Detect the Cocos environment without creating the rule directory**
 
-Create `client/assets/scripts/core/` now. If Cocos Dashboard 3.8 LTS is installed, choose **New Project → Empty (2D)**, set the project name to `client`, and set its parent directory to the repository root; open it once, save, close, and keep generated `client/assets`, `client/settings`, `client/project.json`, `client/tsconfig.json`, and `.meta` files. If the editor is not installed, do not fabricate Cocos UUID, scene, `.meta`, settings, or `project.json` files; Tasks 1–11 proceed with the compatible `client/assets/scripts` source tree, and Task 12 creates the editor shell before any Cocos component work. Never commit `client/library`, `client/temp`, `client/local`, `client/build`, or `client/profiles`.
+Check whether Cocos Dashboard 3.8 LTS is installed, but do not create `client/assets/scripts/core/` yet because Step 4 must observe the architecture test fail on that missing directory. If the editor is installed, choose **New Project → Empty (2D)**, set the project name to `client`, and set its parent directory to the repository root; open it once, save, close, and keep generated `client/assets`, `client/settings`, `client/project.json`, `client/tsconfig.json`, and `.meta` files without creating `client/assets/scripts/core/`. If the editor is not installed, do not fabricate Cocos UUID, scene, `.meta`, settings, or `project.json` files; Step 5 creates the compatible source tree, Tasks 1–11 proceed with it, and Task 12 creates the editor shell before Cocos component work. Never commit `client/library`, `client/temp`, `client/local`, `client/build`, or `client/profiles`.
 
 - [ ] **Step 2: Add the failing architecture test**
 
