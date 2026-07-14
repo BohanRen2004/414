@@ -1,2 +1,10 @@
 .worktrees/
 .superpowers/
+node_modules/
+client/library/
+client/temp/
+client/local/
+client/build/
+client/profiles/
+coverage/
+*.log
