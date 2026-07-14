@@ -63,10 +63,11 @@ Rule files are split by responsibility. `reducer.ts` dispatches actions but dele
 
 ## Milestone 1: Deterministic Pure-TypeScript Rule Core
 
-### Task 1: Bootstrap the Cocos shell and rule-test harness
+### Task 1: Bootstrap the Cocos-compatible source tree and rule-test harness
 
 **Files:**
-- Create with Cocos Dashboard: `client/`
+- Create: `client/assets/scripts/core/`
+- Create with Cocos Dashboard when installed: `client/project.json`, `client/settings/`, `client/tsconfig.json`
 - Create: `package.json`
 - Create: `package-lock.json`
 - Create: `tsconfig.rules.json`
@@ -78,9 +79,9 @@ Rule files are split by responsibility. `reducer.ts` dispatches actions but dele
 **Interfaces:**
 - Produces: `RULES_VERSION: "1.0.0"`, root test commands, and the architectural rule that core cannot import Cocos.
 
-- [ ] **Step 1: Create the empty 2D Cocos project**
+- [ ] **Step 1: Create the Cocos-compatible source tree**
 
-In Cocos Dashboard 3.8 LTS, choose **New Project → Empty (2D)**, set the project name to `client`, and set its parent directory to the repository root. Open it once, save, close the editor, and keep generated `client/assets`, `client/settings`, `client/project.json`, `client/tsconfig.json`, and `.meta` files. Do not commit `client/library`, `client/temp`, `client/local`, `client/build`, or `client/profiles`.
+Create `client/assets/scripts/core/` now. If Cocos Dashboard 3.8 LTS is installed, choose **New Project → Empty (2D)**, set the project name to `client`, and set its parent directory to the repository root; open it once, save, close, and keep generated `client/assets`, `client/settings`, `client/project.json`, `client/tsconfig.json`, and `.meta` files. If the editor is not installed, do not fabricate Cocos UUID, scene, `.meta`, settings, or `project.json` files; Tasks 1–11 proceed with the compatible `client/assets/scripts` source tree, and Task 12 creates the editor shell before any Cocos component work. Never commit `client/library`, `client/temp`, `client/local`, `client/build`, or `client/profiles`.
 
 - [ ] **Step 2: Add the failing architecture test**
 
@@ -173,6 +174,7 @@ export const RULES_VERSION = '1.0.0' as const;
 
 ```gitignore
 # .gitignore
+.worktrees/
 node_modules/
 client/library/
 client/temp/
@@ -560,6 +562,7 @@ git commit -m "feat: compare 4A4 play patterns"
 
 ```ts
 const setup = createSetupState();
+const setupSnapshot = structuredClone(setup);
 const started = expectSuccess(applyAction(setup, { kind: 'START_GAME', seed: 414 }));
 expect(started.state.phase).toBe('FREE_LEAD');
 expect(started.state.players.map((p) => p.hand.length)).toEqual([27, 27, 27, 27]);
@@ -567,7 +570,7 @@ expect(started.state.currentPlayer).toBe(started.state.firstPlayer);
 
 const again = applyAction(started.state, { kind: 'START_GAME', seed: 414 });
 expect(again).toMatchObject({ ok: false, error: { code: 'WRONG_PHASE' } });
-expect(started.state).toEqual(started.state); // reducer never mutates the input reference graph
+expect(setup).toEqual(setupSnapshot); // reducer never mutates its input state
 ```
 
 Use these shared result helpers in all later reducer tests:
@@ -1178,6 +1181,8 @@ git commit -m "feat: complete deterministic headless AI matches"
 - Produces: `TableViewModel`, `buildTableViewModel`, `MainTable` Cocos component.
 
 - [ ] **Step 1: Write failing view-model tests**
+
+Before this step, confirm Cocos Creator 3.8 LTS is installed. If Task 1 used the editor-less fallback, use Cocos Dashboard **New Project → Empty (2D)** in a temporary empty directory, then copy only the generated `project.json`, `settings/`, `tsconfig.json`, base `assets` metadata, and package metadata into `client/` without overwriting `client/assets/scripts`; open `client`, let Cocos import the existing scripts, and commit the generated `.meta` files with this task. If Cocos Creator 3.8 LTS is still unavailable, report `BLOCKED` instead of fabricating editor files.
 
 Test seat mapping, hidden AI hands, exact public counts, current holder, phase-specific button visibility, report counts, current pattern label, and selected-card legality/error key.
 
