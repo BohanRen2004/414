@@ -414,23 +414,31 @@ it.each([
   ['double straight', repeatedRanks([Rank.THREE, Rank.FOUR, Rank.FIVE], 2), 'DOUBLE_STRAIGHT'],
   ['triple straight', repeatedRanks([Rank.QUEEN, Rank.KING, Rank.ACE], 3), 'TRIPLE_STRAIGHT'],
   ['three-kind', sameRank(Rank.EIGHT, 3), 'N_OF_KIND_BOMB'],
+  ['three 2s', sameRank(Rank.TWO, 3), 'N_OF_KIND_BOMB'],
   ['eight-kind', sameRank(Rank.ACE, 8), 'N_OF_KIND_BOMB'],
   ['joker bomb', [smallJoker(), bigJoker()], 'JOKER_BOMB'],
   ['4A4', [four('a'), four('b'), ace('c')], 'FOUR_A_FOUR'],
   ['heart 4A4', [heartFour('a'), heartFour('b'), heartAce('c')], 'FOUR_A_FOUR'],
 ])('%s', (_name, cards, kind) => expect(recognize(cards).kind).toBe(kind));
 
+expect(recognize([heartFour('a'), heartFour('b'), heartAce('c')])).toMatchObject({ kind: 'FOUR_A_FOUR', allHearts: true });
+expect(recognize([four('a'), four('b'), ace('c')])).toMatchObject({ kind: 'FOUR_A_FOUR', allHearts: false });
+expect(recognize([smallJoker(), c('small-2', Rank.SMALL_JOKER, Suit.JOKER)])).toMatchObject({ kind: 'PAIR', rank: Rank.SMALL_JOKER });
+expect(recognize([bigJoker(), c('big-2', Rank.BIG_JOKER, Suit.JOKER)])).toMatchObject({ kind: 'PAIR', rank: Rank.BIG_JOKER });
+expect(recognize(ranks([Rank.THREE, Rank.FOUR, Rank.FIVE, Rank.SIX, Rank.SEVEN, Rank.EIGHT, Rank.NINE, Rank.TEN, Rank.JACK, Rank.QUEEN, Rank.KING, Rank.ACE]))).toMatchObject({ kind: 'STRAIGHT', multiplicity: 1, runLength: 12, low: Rank.THREE, high: Rank.ACE });
+expect(recognize(sameRank(Rank.ACE, 8))).toMatchObject({ kind: 'N_OF_KIND_BOMB', rank: Rank.ACE, count: 8 });
+
 it.each([
-  ['empty', []],
-  ['duplicate ID', [c('same', Rank.THREE), c('same', Rank.THREE)]],
-  ['mixed pair', [c('a', Rank.THREE), c('b', Rank.FOUR)]],
-  ['short straight', ranks([Rank.THREE, Rank.FOUR])],
-  ['gapped straight', ranks([Rank.THREE, Rank.FIVE, Rank.SIX])],
-  ['straight with 2', ranks([Rank.QUEEN, Rank.KING, Rank.ACE, Rank.TWO])],
-  ['uneven multiplicity', [...sameRank(Rank.THREE, 2), c('x', Rank.FOUR)]],
-  ['quadruple straight', repeatedRanks([Rank.THREE, Rank.FOUR, Rank.FIVE], 4)],
-  ['three mixed cards', ranks([Rank.FOUR, Rank.FIVE, Rank.ACE])],
-])('rejects %s', (_name, cards) => expect(recognize(cards).kind).toBe('INVALID'));
+  ['empty', [], 'EMPTY'],
+  ['duplicate ID', [c('same', Rank.THREE), c('same', Rank.THREE)], 'DUPLICATE_CARD_ID'],
+  ['mixed pair', [c('a', Rank.THREE), c('b', Rank.FOUR)], 'MIXED_RANKS'],
+  ['short double straight', repeatedRanks([Rank.THREE, Rank.FOUR], 2), 'SEQUENCE_TOO_SHORT'],
+  ['gapped straight', ranks([Rank.THREE, Rank.FIVE, Rank.SIX]), 'SEQUENCE_GAP'],
+  ['straight with 2', ranks([Rank.QUEEN, Rank.KING, Rank.ACE, Rank.TWO]), 'SEQUENCE_FORBIDDEN_RANK'],
+  ['uneven multiplicity', [...sameRank(Rank.THREE, 2), c('x', Rank.FOUR)], 'SEQUENCE_MULTIPLICITY'],
+  ['quadruple straight', repeatedRanks([Rank.THREE, Rank.FOUR, Rank.FIVE], 4), 'SEQUENCE_MULTIPLICITY'],
+  ['joker bomb with extra card', [smallJoker(), bigJoker(), c('x', Rank.THREE)], 'UNSUPPORTED_COMBINATION'],
+])('rejects %s', (_name, cards, reason) => expect(recognize(cards)).toEqual({ kind: 'INVALID', reason }));
 ```
 
 - [ ] **Step 2: Run the test and observe missing recognizer**
@@ -463,7 +471,7 @@ export interface CardGroup {
 
 - [ ] **Step 4: Implement recognition in a fixed order**
 
-Implement these pure stages in `recognize.ts`: reject empty/duplicate IDs; detect mixed small+big joker; detect exact 4A4; detect one/two/equal-rank 3–8; build a rank-count map for 3..A; accept only 3+ consecutive ranks with multiplicity 1, 2, or 3; otherwise return a stable `INVALID` reason. Do not inspect input order or suit except for red-heart 4A4.
+Implement these pure stages in `recognize.ts`: reject empty/duplicate IDs; recognize one card; for exactly two cards recognize one-small-plus-one-big as `JOKER_BOMB`, equal ranks as `PAIR`, otherwise `MIXED_RANKS`; detect exact three-card 4A4; detect 3–8 equal-rank cards only when the rank is an ordinary rank from 3 through 2; reject any selection larger than two that contains a joker as `UNSUPPORTED_COMBINATION`; then evaluate sequence candidates. For sequences, first reject any 2 as `SEQUENCE_FORBIDDEN_RANK`, then build the 3..A rank-count map; unequal per-rank counts or multiplicity above 3 is `SEQUENCE_MULTIPLICITY`, fewer than three distinct ranks is `SEQUENCE_TOO_SHORT`, and a gap is `SEQUENCE_GAP`; accept only consecutive multiplicity 1, 2, or 3. Do not inspect input order or suit except for red-heart 4A4.
 
 ```ts
 export function recognize(cards: readonly Card[]): PlayPattern;
@@ -478,7 +486,7 @@ Expected: all recognition table rows pass.
 Run: `npm run verify`
 
 ```powershell
-git add client/assets/scripts/core/patterns client/assets/scripts/core/index.ts tests/core/recognize.test.ts
+git add client/assets/scripts/core/patterns client/assets/scripts/core/index.ts tests/helpers/cards.ts tests/core/recognize.test.ts
 git commit -m "feat: recognize 4A4 play patterns"
 ```
 
