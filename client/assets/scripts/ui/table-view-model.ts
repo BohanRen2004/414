@@ -3,6 +3,7 @@ import { beats } from '../core/patterns/compare';
 import { recognize } from '../core/patterns/recognize';
 import { CardGroup, PatternErrorCode, PlayPattern } from '../core/patterns/play-pattern';
 import { GameState, PublicActionRecord } from '../core/state/game-state';
+import { ResultViewModel, buildResultViewModel } from './result-view-model';
 
 export interface HumanUiState {
   readonly humanPlayerId: PlayerId;
@@ -31,14 +32,10 @@ export interface GouChaPromptViewModel {
   readonly rank: Rank;
   readonly requiredCount: 1 | 2;
   readonly suggestedCardIds: readonly string[];
+  readonly eligibleCardIds: readonly string[];
 }
 
-export interface ResultViewModel {
-  readonly places: readonly PlayerId[];
-  readonly winningTeam: TeamId;
-  readonly capturedOpponents: 0 | 1 | 2;
-  readonly seed: number;
-}
+export type { ResultViewModel } from './result-view-model';
 
 export interface TableViewModel {
   readonly seats: Readonly<Record<'bottom' | 'top' | 'left' | 'right', SeatViewModel>>;
@@ -159,25 +156,20 @@ function buildGouChaPrompt(state: GameState, input: HumanUiState): GouChaPromptV
     || state.currentPlayer !== input.humanPlayerId) return null;
   const requiredCount = chain.nextAddition === 'CHA' ? 2 : 1;
   const matching = state.players[input.humanPlayerId]!.hand
-    .filter((card) => card.rank === chain.rank)
-    .slice(0, requiredCount);
+    .filter((card) => card.rank === chain.rank);
   return {
     playerId: input.humanPlayerId,
     addition: chain.nextAddition,
     rank: chain.rank,
     requiredCount,
-    suggestedCardIds: matching.map((card) => card.id),
+    suggestedCardIds: matching.slice(0, requiredCount).map((card) => card.id),
+    eligibleCardIds: matching.map((card) => card.id),
   };
 }
 
 function buildResult(state: GameState): ResultViewModel | null {
   if (state.result === null) return null;
-  return {
-    places: [...state.result.finishOrder],
-    winningTeam: state.result.winningTeam,
-    capturedOpponents: state.result.capturedOpponents,
-    seed: state.rootSeed ?? 0,
-  };
+  return buildResultViewModel(state.result, state.rootSeed ?? 0);
 }
 
 export function buildTableViewModel(state: GameState, input: HumanUiState): TableViewModel {
