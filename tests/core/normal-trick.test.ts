@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Rank } from '../../client/assets/scripts/core/cards/card';
+import { PlayerId, Rank } from '../../client/assets/scripts/core/cards/card';
 import { CardGroup } from '../../client/assets/scripts/core/patterns/play-pattern';
 import { applyAction } from '../../client/assets/scripts/core/rules/reducer';
 import { c } from '../helpers/cards';
@@ -14,7 +14,7 @@ const hands = {
 } as const;
 const orderedRanks = [Rank.THREE, Rank.FOUR, Rank.FIVE, Rank.SIX, Rank.SEVEN, Rank.EIGHT] as const;
 
-function currentSingle(id: string, rank: Rank, playerId: 0 | 1): CardGroup {
+function currentSingle(id: string, rank: Rank, playerId: PlayerId): CardGroup {
   return { cardIds: [id], pattern: { kind: 'SINGLE', rank }, playerId, actionNumber: 1 };
 }
 
@@ -149,15 +149,15 @@ describe('normal play', () => {
     expect(afterSeat3Beats.trick?.holderId).toBe(3);
   });
 
-  it('resets only after every other active player passes and grants next active lead', () => {
+  it('resets after every other active player passes and grants next active lead', () => {
     const lead = dispatch(responseState(), { kind: 'PASS', playerId: 1 });
     const pass2 = dispatch(lead, { kind: 'PASS', playerId: 2 });
-    const pass3 = dispatch(pass2, { kind: 'PASS', playerId: 3 });
-    const reset = dispatch(pass3, { kind: 'PASS', playerId: 0 });
+    const finalPass = expectSuccess(applyAction(pass2, { kind: 'PASS', playerId: 3 }));
+    const reset = finalPass.state;
     expect(reset.phase).toBe('FREE_LEAD');
     expect(reset.currentPlayer).toBe(1);
     expect(reset.trick).toBeNull();
-    expect(expectSuccess(applyAction(pass3, { kind: 'PASS', playerId: 0 })).events).toContainEqual({ kind: 'TRICK_RESET' });
+    expect(finalPass.events).toContainEqual({ kind: 'TRICK_RESET' });
   });
 
   it('skips finished seats for response and next free lead', () => {

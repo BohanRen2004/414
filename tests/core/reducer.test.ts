@@ -73,7 +73,7 @@ describe('start game', () => {
     expect(started.state).toEqual(snapshot);
   });
 
-  it('rejects every non-start action until its reducer stage is implemented', () => {
+  it('routes actions by phase and rejects missing cards in a live state', () => {
     const setup = createSetupState();
     const built = buildState({
       phase: 'FREE_LEAD',
@@ -88,8 +88,11 @@ describe('start game', () => {
     ] as const;
     for (const action of actions) {
       expect(errorCode(applyAction(setup, action))).toBe('WRONG_PHASE');
-      expect(errorCode(applyAction(built, action))).toBe('WRONG_PHASE');
     }
+    expect(errorCode(applyAction(built, actions[0]!))).toBe('CARD_NOT_OWNED');
+    expect(errorCode(applyAction(built, actions[1]!))).toBe('WRONG_PHASE');
+    expect(errorCode(applyAction(built, actions[2]!))).toBe('WRONG_PHASE');
+    expect(errorCode(applyAction(built, actions[3]!))).toBe('WRONG_PHASE');
     expect(built.phase).toBe('FREE_LEAD');
     expect(built.actionNumber).toBe(1);
   });

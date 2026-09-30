@@ -4,8 +4,14 @@ import { recognize } from '../../client/assets/scripts/core/patterns/recognize';
 
 const ordinarySuits = [Suit.CLUB, Suit.DIAMOND, Suit.HEART, Suit.SPADE] as const;
 
-export function c(id: string, rank: Rank, suit: Suit = Suit.CLUB): Card {
-  return { id, rank, suit, deckIndex: 0 };
+export function c(id: string, rank: Rank, suit?: Suit): Card {
+  if (suit !== undefined) return { id, rank, suit, deckIndex: 0 };
+  const fixtureCard = { id, rank, suit: Suit.CLUB, deckIndex: 0 as const, __fixtureFlexibleSuit: true };
+  return fixtureCard;
+}
+
+export function hasFlexibleFixtureSuit(card: Card): boolean {
+  return (card as Card & { readonly __fixtureFlexibleSuit?: boolean }).__fixtureFlexibleSuit === true;
 }
 
 export function sameRank(rank: Rank, count: number): Card[] {

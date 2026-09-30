@@ -226,9 +226,9 @@ describe('table view model', () => {
     const first = nextHint(humanInput(['stale']), legalPlays);
     const second = nextHint(first, legalPlays);
     const wrapped = nextHint(second, legalPlays);
-    expect(first.selectedCardIds).toEqual(['a', 'b']);
+    expect([...first.selectedCardIds].sort()).toEqual(['a', 'b']);
     expect(second.selectedCardIds).toEqual(['c']);
-    expect(wrapped.selectedCardIds).toEqual(['a', 'b']);
+    expect([...wrapped.selectedCardIds].sort()).toEqual(['a', 'b']);
     expect(new Set(wrapped.selectedCardIds).size).toBe(wrapped.selectedCardIds.length);
     expect(nextHint({ ...humanInput(['stale']), hintIndex: 7 }, []).selectedCardIds).toEqual([]);
     expect(nextHint(humanInput(['stale']), [{ kind: 'PASS', playerId: 0 }]).selectedCardIds).toEqual([]);

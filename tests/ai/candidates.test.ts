@@ -28,7 +28,14 @@ function buildHand(): Card[] {
 
 function sourceState(phase: 'FREE_LEAD' | 'RESPONDING' = 'FREE_LEAD') {
   const hand = buildHand();
-  const otherHands = { 0: hand, 1: [] as Card[], 2: [] as Card[], 3: [] as Card[] };
+  const handIds = new Set(hand.map((card) => card.id));
+  const fillers = createDoubleDeck().filter((card) => !handIds.has(card.id)).slice(0, 3);
+  const otherHands = {
+    0: hand,
+    1: [fillers[0]!],
+    2: [fillers[1]!],
+    3: [fillers[2]!],
+  };
   if (phase === 'FREE_LEAD') return buildState({ phase, currentPlayer: 0, hands: otherHands });
   const currentPlay = group([c('public-five', Rank.FIVE)], 1, 1);
   return buildState({ phase, currentPlayer: 0, hands: otherHands, currentPlay, holderId: 1 });

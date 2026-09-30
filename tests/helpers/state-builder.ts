@@ -3,6 +3,7 @@ import { createDoubleDeck, dealFourPlayers } from '../../client/assets/scripts/c
 import { CardGroup } from '../../client/assets/scripts/core/patterns/play-pattern';
 import { deriveSeed } from '../../client/assets/scripts/core/random/prng';
 import { GamePhase, GameState, GouChaChain, PlayerState, TrickState } from '../../client/assets/scripts/core/state/game-state';
+import { hasFlexibleFixtureSuit } from './cards';
 
 export interface StateFixture {
   readonly seed?: number;
@@ -138,7 +139,13 @@ export function buildState(fixture: StateFixture): GameState {
     const aliasedHand = fixture.hands[playerId].map((card) => {
       if (seenIds.has(card.id)) throw new Error(`Fixture card ID ${card.id} is used more than once`);
       seenIds.add(card.id);
-      const canonical = takeCanonical(card.id, card.rank, card.suit, unused, canonicalDeck);
+      const canonical = takeCanonical(
+        card.id,
+        card.rank,
+        hasFlexibleFixtureSuit(card) ? null : card.suit,
+        unused,
+        canonicalDeck,
+      );
       return { ...canonical, id: card.id };
     });
     hands.set(playerId, aliasedHand);

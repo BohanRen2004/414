@@ -99,7 +99,7 @@ describe('basic AI action selection', () => {
 
   it('usually passes rather than overtaking a teammate who holds the play', () => {
     const state = buildResponding(
-      ranks([Rank.ACE]),
+      ranks([Rank.ACE, Rank.THREE]),
       2,
       Rank.FIVE,
       { 1: sameRank(Rank.SEVEN, 4), 2: [c('holder-five', Rank.FIVE)], 3: sameRank(Rank.EIGHT, 4) },
