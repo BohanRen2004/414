@@ -14,6 +14,8 @@ export interface StateFixture {
   readonly passedPlayerIds?: readonly PlayerId[];
   readonly finishOrder?: readonly PlayerId[];
   readonly gouCha?: GouChaChain;
+  /** Applied last for deliberate invariant-corruption fixtures. */
+  readonly overrides?: Partial<GameState>;
 }
 
 function getPatternRanks(pattern: CardGroup['pattern']): Rank[] {
@@ -121,6 +123,16 @@ export function buildState(fixture: StateFixture): GameState {
   const unused = [...canonicalDeck];
   const hands = new Map<PlayerId, readonly Card[]>();
   const seenIds = new Set<string>();
+  const finishOrder = fixture.finishOrder ?? [];
+  for (const [placeIndex, playerId] of finishOrder.slice(0, 3).entries()) {
+    if (fixture.hands[playerId].length > 0) {
+      throw new Error(`Fixture finish place ${placeIndex + 1} (player ${playerId}) must have an empty hand`);
+    }
+  }
+  const fourthPlayer = finishOrder[3];
+  if (fourthPlayer !== undefined && fixture.hands[fourthPlayer].length > 0 && fixture.phase !== 'ROUND_RESULT') {
+    throw new Error(`Fixture fourth-place player ${fourthPlayer} may retain cards only in ROUND_RESULT`);
+  }
 
   for (const playerId of [0, 1, 2, 3] as const) {
     const aliasedHand = fixture.hands[playerId].map((card) => {
@@ -166,7 +178,6 @@ export function buildState(fixture: StateFixture): GameState {
     seenIds.add(id);
   }
 
-  const finishOrder = fixture.finishOrder ?? [];
   const players: GameState['players'] = [
     playerState(0, hands.get(0)!, finishOrder),
     playerState(1, hands.get(1)!, finishOrder),
@@ -198,7 +209,7 @@ export function buildState(fixture: StateFixture): GameState {
   if (allStateCardIds.length !== canonicalDeck.length || new Set(allStateCardIds).size !== canonicalDeck.length) {
     throw new Error('Fixture card IDs do not form a unique complete physical deck');
   }
-  return {
+  const state: GameState = {
     rulesVersion: '1.0.0',
     phase: fixture.phase,
     rootSeed: seed,
@@ -216,4 +227,5 @@ export function buildState(fixture: StateFixture): GameState {
     actionNumber: fixture.phase === 'SETUP' ? 0 : 1,
     result: null,
   };
+  return { ...state, ...fixture.overrides };
 }

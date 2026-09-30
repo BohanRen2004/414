@@ -164,6 +164,7 @@ describe('normal play', () => {
     const state = responseState({
       currentPlayer: 2,
       finishOrder: [1],
+      hands: { ...hands, 1: [] },
     });
     expect(state.players[1].finishPlace).toBe(1);
     const afterPlay = dispatch(state, { kind: 'PLAY_CARDS', playerId: 2, cardIds: ['5a'] });

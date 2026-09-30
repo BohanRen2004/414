@@ -126,7 +126,7 @@ describe('corrected single-card gou-cha', () => {
   it('automatically skips finished and rank-ineligible seats in clockwise order', () => {
     const state = startSingleFive({
       0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
-      1: [c('finished-a', Rank.FIVE), c('finished-b', Rank.FIVE)],
+      1: [],
       2: [c('ineligible', Rank.SIX)],
       3: [c('eligible-a', Rank.FIVE), c('eligible-b', Rank.FIVE)],
     }, [1]);
@@ -215,6 +215,7 @@ describe('corrected single-card gou-cha', () => {
 
     const finishedActor: GameState = {
       ...query,
+      finishOrder: [1],
       players: [
         query.players[0],
         { ...query.players[1], finishPlace: 1 },

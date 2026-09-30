@@ -6,6 +6,7 @@ import { GameEvent } from '../state/game-event';
 import { GameState, PlayerState } from '../state/game-state';
 import { RuleError, ruleError } from '../state/rule-error';
 import { addGouCha, declineGouCha, maybeStartGouCha } from './goucha';
+import { assertGameState } from './invariants';
 import { passTurn, playCards } from './normal-trick';
 
 export type ActionResult =
@@ -78,7 +79,7 @@ function startGame(state: GameState, seed: number): ActionResult {
   };
 }
 
-export function applyAction(state: GameState, action: GameAction): ActionResult {
+function applyActionUnchecked(state: GameState, action: GameAction): ActionResult {
   if (action.kind === 'START_GAME') return startGame(state, action.seed);
   if (state.phase === 'ROUND_RESULT') return { ok: false, error: ruleError('GAME_ALREADY_FINISHED') };
   if (state.phase === 'GOUCHA_QUERY') {
@@ -105,4 +106,32 @@ export function applyAction(state: GameState, action: GameAction): ActionResult 
   }
   if (action.kind === 'PASS') return passTurn(state, action);
   return { ok: false, error: ruleError('WRONG_PHASE') };
+}
+
+let invariantAssertionsOverride: boolean | undefined;
+
+/** Explicit opt-in for embedding runtimes and tests; no Node `process` global is required. */
+export function setInvariantAssertionsEnabled(enabled: boolean): void {
+  invariantAssertionsOverride = enabled;
+}
+
+function shouldAssertSuccessfulTransitions(): boolean {
+  if (invariantAssertionsOverride !== undefined) return invariantAssertionsOverride;
+  const runtime = globalThis as typeof globalThis & {
+    __414_DEV__?: boolean;
+    DEBUG?: boolean;
+    CC_DEBUG?: boolean;
+  };
+  const nodeEnvironment = typeof process === 'undefined' ? undefined : process.env?.NODE_ENV;
+  return nodeEnvironment === 'test'
+    || nodeEnvironment === 'development'
+    || runtime.__414_DEV__ === true
+    || runtime.DEBUG === true
+    || runtime.CC_DEBUG === true;
+}
+
+export function applyAction(state: GameState, action: GameAction): ActionResult {
+  const result = applyActionUnchecked(state, action);
+  if (result.ok && shouldAssertSuccessfulTransitions()) assertGameState(result.state);
+  return result;
 }

@@ -6,6 +6,8 @@ export * from './patterns/compare';
 export * from './patterns/play-pattern';
 export * from './patterns/recognize';
 export * from './random/prng';
+export * from './diagnostics/action-log';
+export * from './rules/invariants';
 export * from './state/game-action';
 export * from './state/game-event';
 export * from './state/game-state';
