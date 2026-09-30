@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { Card, PlayerId, Rank, Suit } from '../../client/assets/scripts/core/cards/card';
+import { GameAction } from '../../client/assets/scripts/core/state/game-action';
 import { GameResult } from '../../client/assets/scripts/core/state/game-state';
+import { clearSelection, nextHint, selectRange, toggleCard } from '../../client/assets/scripts/ui/hand-selection';
 import { buildTableViewModel } from '../../client/assets/scripts/ui/table-view-model';
 import { buildState } from '../helpers/state-builder';
 import { group, sameRank } from '../helpers/cards';
@@ -185,5 +187,50 @@ describe('table view model', () => {
     const vm = buildTableViewModel(state, humanInput());
     expect(vm.result).toEqual({ places: [0, 2, 1, 3], winningTeam: 0, capturedOpponents: 2, seed: 414 });
     expect(vm.controls).toMatchObject({ showPlay: false, showPass: false, showHint: false, playEnabled: false });
+  });
+
+  it('toggles only current-hand cards, removes duplicates, and keeps hand order', () => {
+    const hand = [card('a', Rank.THREE), card('b', Rank.FOUR), card('c', Rank.FIVE)];
+    const ui = { ...humanInput(), selectedCardIds: ['outside', 'b', 'b'] };
+    const toggledOn = toggleCard(ui, 'c', hand);
+    expect(toggledOn.selectedCardIds).toEqual(['b', 'c']);
+    expect(toggledOn.hintIndex).toBe(0);
+    const toggledOff = toggleCard(toggledOn, 'b', hand);
+    expect(toggledOff.selectedCardIds).toEqual(['c']);
+    expect(toggleCard(toggledOff, 'outside', hand).selectedCardIds).toEqual(['c']);
+  });
+
+  it('selects and clears inclusive ranges while filtering stale IDs', () => {
+    const orderedIds = ['a', 'b', 'c', 'd'];
+    const ui = { ...humanInput(), selectedCardIds: ['outside', 'a', 'a'], hintIndex: 3 };
+    const selected = selectRange(ui, orderedIds, 3, 1, true);
+    expect(selected.selectedCardIds).toEqual(['a', 'b', 'c', 'd']);
+    expect(selected.hintIndex).toBe(0);
+    const clearedRange = selectRange(selected, orderedIds, 2, 1, false);
+    expect(clearedRange.selectedCardIds).toEqual(['a', 'd']);
+    expect(selectRange(ui, orderedIds, -1, 99, true).selectedCardIds).toEqual(['a']);
+  });
+
+  it('clears selection and resets the hint cursor', () => {
+    expect(clearSelection({ ...humanInput(['a', 'a']), hintIndex: 5 }))
+      .toMatchObject({ selectedCardIds: [], hintIndex: 0 });
+  });
+
+  it('cycles unique card-bearing legal hints and handles empty or non-card candidates', () => {
+    const legalPlays: GameAction[] = [
+      { kind: 'PLAY_CARDS', playerId: 0, cardIds: ['a', 'b'] },
+      { kind: 'PASS', playerId: 0 },
+      { kind: 'PLAY_CARDS', playerId: 0, cardIds: ['c'] },
+      { kind: 'PLAY_CARDS', playerId: 0, cardIds: ['b', 'a'] },
+    ];
+    const first = nextHint(humanInput(['stale']), legalPlays);
+    const second = nextHint(first, legalPlays);
+    const wrapped = nextHint(second, legalPlays);
+    expect(first.selectedCardIds).toEqual(['a', 'b']);
+    expect(second.selectedCardIds).toEqual(['c']);
+    expect(wrapped.selectedCardIds).toEqual(['a', 'b']);
+    expect(new Set(wrapped.selectedCardIds).size).toBe(wrapped.selectedCardIds.length);
+    expect(nextHint({ ...humanInput(['stale']), hintIndex: 7 }, []).selectedCardIds).toEqual([]);
+    expect(nextHint(humanInput(['stale']), [{ kind: 'PASS', playerId: 0 }]).selectedCardIds).toEqual([]);
   });
 });
