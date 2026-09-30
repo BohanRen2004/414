@@ -5,6 +5,7 @@ import { GameAction } from '../state/game-action';
 import { GameEvent } from '../state/game-event';
 import { GameState, PlayerState } from '../state/game-state';
 import { RuleError, ruleError } from '../state/rule-error';
+import { XorShift32 } from '../random/prng';
 import { addGouCha, declineGouCha, maybeStartGouCha } from './goucha';
 import { assertGameState } from './invariants';
 import { passTurn, playCards } from './normal-trick';
@@ -131,7 +132,20 @@ function shouldAssertSuccessfulTransitions(): boolean {
 }
 
 export function applyAction(state: GameState, action: GameAction): ActionResult {
-  const result = applyActionUnchecked(state, action);
+  let result = applyActionUnchecked(state, action);
+  const playerId = action.kind === 'START_GAME' ? null : action.playerId;
+  if (result.ok && playerId !== null && state.randomState !== null
+    && state.players[playerId].controlType === 'BASIC_AI' && result.state.randomState !== null) {
+    const aiRandom = new XorShift32(state.randomState.ai);
+    aiRandom.nextUint32();
+    result = {
+      ...result,
+      state: {
+        ...result.state,
+        randomState: { ...result.state.randomState, ai: aiRandom.snapshot() },
+      },
+    };
+  }
   if (result.ok && shouldAssertSuccessfulTransitions()) assertGameState(result.state);
   return result;
 }
