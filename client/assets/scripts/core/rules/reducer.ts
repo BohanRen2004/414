@@ -5,6 +5,7 @@ import { GameAction } from '../state/game-action';
 import { GameEvent } from '../state/game-event';
 import { GameState, PlayerState } from '../state/game-state';
 import { RuleError, ruleError } from '../state/rule-error';
+import { passTurn, playCards } from './normal-trick';
 
 export type ActionResult =
   | { readonly ok: true; readonly state: GameState; readonly events: readonly GameEvent[] }
@@ -78,5 +79,8 @@ function startGame(state: GameState, seed: number): ActionResult {
 
 export function applyAction(state: GameState, action: GameAction): ActionResult {
   if (action.kind === 'START_GAME') return startGame(state, action.seed);
+  if (state.phase === 'ROUND_RESULT') return { ok: false, error: ruleError('GAME_ALREADY_FINISHED') };
+  if (action.kind === 'PLAY_CARDS') return playCards(state, action);
+  if (action.kind === 'PASS') return passTurn(state, action);
   return { ok: false, error: ruleError('WRONG_PHASE') };
 }
