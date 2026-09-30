@@ -7,7 +7,7 @@ import { GameState, PlayerState, PublicActionRecord, TrickState } from '../state
 import type { ActionResult } from './reducer';
 import { buildResult } from './results';
 
-function active(player: PlayerState): boolean {
+export function active(player: PlayerState): boolean {
   return player.hand.length > 0 && player.finishPlace === null;
 }
 
@@ -61,7 +61,7 @@ function findNextResponder(
   return null;
 }
 
-function finishEvents(state: GameState, playerId: PlayerId, remaining: number): GameEvent[] {
+export function finishEvents(state: GameState, playerId: PlayerId, remaining: number): GameEvent[] {
   const events: GameEvent[] = [];
   const lastReportedCount = state.players[playerId]!.lastReportedCount;
   if (remaining > 0 && remaining <= 3 && remaining !== lastReportedCount) {
@@ -73,7 +73,7 @@ function finishEvents(state: GameState, playerId: PlayerId, remaining: number): 
   return events;
 }
 
-function completeIfOneActive(state: GameState, events: GameEvent[]): GameState {
+export function completeIfOneActive(state: GameState, events: GameEvent[]): GameState {
   const remaining = state.players.filter(active);
   if (remaining.length !== 1) return state;
 

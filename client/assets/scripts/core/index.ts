@@ -10,4 +10,5 @@ export * from './state/game-action';
 export * from './state/game-event';
 export * from './state/game-state';
 export * from './state/rule-error';
+export * from './rules/goucha';
 export * from './rules/reducer';

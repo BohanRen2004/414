@@ -33,7 +33,7 @@ export interface GouChaChain {
   readonly basePlay: CardGroup;
   readonly additions: readonly GouChaAddition[];
   readonly aggregateCardIds: readonly string[];
-  readonly aggregatePattern: Extract<PlayPattern, { kind: 'N_OF_KIND_BOMB' }>;
+  readonly aggregatePattern: Extract<PlayPattern, { kind: 'SINGLE' | 'N_OF_KIND_BOMB' }>;
   readonly holderId: PlayerId;
   readonly nextAddition: 'CHA' | 'GOU';
   readonly queryCursor: PlayerId;

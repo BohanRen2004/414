@@ -5,6 +5,7 @@ import { GameAction } from '../state/game-action';
 import { GameEvent } from '../state/game-event';
 import { GameState, PlayerState } from '../state/game-state';
 import { RuleError, ruleError } from '../state/rule-error';
+import { addGouCha, declineGouCha, maybeStartGouCha } from './goucha';
 import { passTurn, playCards } from './normal-trick';
 
 export type ActionResult =
@@ -80,7 +81,28 @@ function startGame(state: GameState, seed: number): ActionResult {
 export function applyAction(state: GameState, action: GameAction): ActionResult {
   if (action.kind === 'START_GAME') return startGame(state, action.seed);
   if (state.phase === 'ROUND_RESULT') return { ok: false, error: ruleError('GAME_ALREADY_FINISHED') };
-  if (action.kind === 'PLAY_CARDS') return playCards(state, action);
+  if (state.phase === 'GOUCHA_QUERY') {
+    if (action.kind === 'ADD_GOUCHA') return addGouCha(state, action);
+    if (action.kind === 'DECLINE_GOUCHA') return declineGouCha(state, action.playerId);
+    return { ok: false, error: ruleError('WRONG_PHASE') };
+  }
+  if (action.kind === 'PLAY_CARDS') {
+    const result = playCards(state, action);
+    if (!result.ok) return result;
+    const base = result.state.trick?.currentPlay;
+    if (result.state.phase !== 'RESPONDING' || base?.pattern.kind !== 'SINGLE') return result;
+
+    const started = maybeStartGouCha(result.state, base);
+    if (started === result.state) return result;
+    const events = [...result.events];
+    if (started.currentPlayer !== result.state.currentPlayer && events[events.length - 1]?.kind === 'TURN_CHANGED') {
+      events.pop();
+    }
+    if (started.currentPlayer !== result.state.currentPlayer && started.currentPlayer !== null) {
+      events.push({ kind: 'TURN_CHANGED', playerId: started.currentPlayer });
+    }
+    return { ok: true, state: started, events };
+  }
   if (action.kind === 'PASS') return passTurn(state, action);
   return { ok: false, error: ruleError('WRONG_PHASE') };
 }
