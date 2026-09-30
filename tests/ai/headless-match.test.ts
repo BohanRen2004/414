@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildObservation } from '../../client/assets/scripts/ai/ai-observation';
 import { chooseBasicAiAction } from '../../client/assets/scripts/ai/basic-ai';
 import { applyAction, createSetupState, setInvariantAssertionsEnabled } from '../../client/assets/scripts/core/rules/reducer';
@@ -6,7 +6,7 @@ import { GameAction } from '../../client/assets/scripts/core/state/game-action';
 import { GameState } from '../../client/assets/scripts/core/state/game-state';
 import { XorShift32 } from '../../client/assets/scripts/core/random/prng';
 import { expectSuccess } from '../helpers/actions';
-import { AnimationSink } from '../../client/assets/scripts/app/animation-queue';
+import { AnimationQueue, AnimationSink, EventRenderer } from '../../client/assets/scripts/app/animation-queue';
 import { GameController } from '../../client/assets/scripts/app/game-controller';
 import { runHeadlessMatch } from '../../client/assets/scripts/app/headless-match';
 
@@ -98,6 +98,67 @@ describe('serialized controller and headless match', () => {
     expect(snapped[0]).toBe(controller.state);
     expect(controller.actionCount).toBe(1);
     expect(controller.state.players[actingPlayer].hand).toHaveLength(initial.players[actingPlayer].hand.length - 1);
+  });
+
+  it('plays queued events in order', async () => {
+    const state = startState(419);
+    const played: string[] = [];
+    const renderer: EventRenderer = {
+      playEvent: async (event) => { played.push(event.kind); },
+      renderState: () => undefined,
+    };
+    const queue = new AnimationQueue(renderer, { timeoutMs: 100 });
+    const events = [
+      { kind: 'GAME_STARTED' as const },
+      { kind: 'TURN_CHANGED' as const, playerId: 2 as const },
+      { kind: 'PLAYER_PASSED' as const, playerId: 1 as const },
+    ];
+
+    await queue.play(events, state);
+
+    expect(played).toEqual(['GAME_STARTED', 'TURN_CHANGED', 'PLAYER_PASSED']);
+  });
+
+  it('snaps once after an animation timeout while preserving committed state and one action', async () => {
+    vi.useFakeTimers();
+    try {
+      const initial = startState(420);
+      const actingPlayer = initial.currentPlayer!;
+      let playCalls = 0;
+      const snapped: GameState[] = [];
+      const renderer: EventRenderer = {
+        playEvent: () => {
+          playCalls += 1;
+          return new Promise<void>(() => undefined);
+        },
+        renderState: (state) => { snapped.push(state); },
+      };
+      const controller = new GameController(initial, new AnimationQueue(renderer, { timeoutMs: 25 }));
+      const action = nextAction(initial);
+      const pending = controller.dispatch(action);
+      await vi.advanceTimersByTimeAsync(25);
+      const result = await pending;
+
+      expect(result.ok).toBe(true);
+      expect(playCalls).toBe(1);
+      expect(snapped).toHaveLength(1);
+      expect(snapped[0]).toBe(controller.state);
+      expect(controller.actionCount).toBe(1);
+      expect(controller.state.actionNumber).toBe(initial.actionNumber + 1);
+      expect(controller.state.players[actingPlayer].hand).toHaveLength(initial.players[actingPlayer].hand.length - 1);
+
+      const [line] = controller.diagnosticLog.split('\n');
+      expect(JSON.parse(line!)).toMatchObject({
+        rulesVersion: initial.rulesVersion,
+        seed: initial.rootSeed,
+        actionNumber: initial.actionNumber,
+        phase: initial.phase,
+        playerId: actingPlayer,
+        code: 'ACTION_APPLIED',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('advances the AI random stream exactly once after one accepted AI action', async () => {
