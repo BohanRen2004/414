@@ -1,6 +1,9 @@
 .worktrees/
 .superpowers/
 node_modules/
+dist/
+.tmp/
+cocos-init-414/
 client/library/
 client/temp/
 client/local/

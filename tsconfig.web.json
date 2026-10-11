@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "types": ["vite/client"],
+    "lib": ["ES2020", "DOM", "DOM.Iterable"]
+  },
+  "include": [
+    "web/src/**/*.ts",
+    "client/assets/scripts/core/**/*.ts",
+    "client/assets/scripts/ai/**/*.ts",
+    "client/assets/scripts/app/**/*.ts",
+    "client/assets/scripts/ui/**/*.ts",
+    "vite.config.ts"
+  ]
+}
