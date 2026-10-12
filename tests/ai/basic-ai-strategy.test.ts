@@ -140,28 +140,19 @@ describe('basic AI strategy: responding to an opponent', () => {
     expect(decision.ranks).toEqual([SIX]);
   });
 
-  it('passes instead of bombing while no opponent is close to finishing', () => {
+  it('bombs an opponent when no ordinary card beats, even while nobody is close to finishing', () => {
     const decision = decide(responding(cards(THREE, FIVE, EIGHT, NINE, NINE, NINE), table(ACE), 1));
+    expect(decision.ranks).toEqual([NINE, NINE, NINE]);
+  });
+
+  it('bombs with the weakest whole bomb rather than a split or a bigger one', () => {
+    const decision = decide(responding(cards(THREE, FIVE, EIGHT, ...times(NINE, 3), ...times(SEVEN, 4)), table(ACE), 1));
+    expect(decision.ranks).toEqual([NINE, NINE, NINE]);
+  });
+
+  it('passes when nothing it holds beats the current play', () => {
+    const decision = decide(responding(cards(THREE, FIVE, NINE, NINE, NINE), table(...times(KING, 4)), 1));
     expect(decision.kind).toBe('PASS');
-  });
-
-  it.each([
-    ['the holder', 1],
-    ['the other opponent', 3],
-  ] as const)('bombs with the weakest whole bomb when %s has at most three cards', (_label, threatSeat) => {
-    const decision = decide(responding(
-      cards(THREE, FIVE, EIGHT, ...times(NINE, 3), ...times(SEVEN, 4)),
-      table(ACE),
-      1,
-      { [threatSeat]: cards(TEN, JACK) },
-    ));
-    expect(decision.kind).toBe('PLAY_CARDS');
-    expect(decision.ranks).toEqual([NINE, NINE, NINE]);
-  });
-
-  it('bombs when the rest of its hand can then be played out in one go', () => {
-    const decision = decide(responding(cards(NINE, NINE, NINE, FIVE, SIX, SEVEN), table(ACE), 1));
-    expect(decision.ranks).toEqual([NINE, NINE, NINE]);
   });
 });
 
@@ -215,9 +206,9 @@ describe('basic AI strategy: gou-cha', () => {
     expect(decision.kind).toBe('DECLINE_GOUCHA');
   });
 
-  it('splits its bomb for a CHA when an opponent is close to finishing', () => {
+  it('keeps its bomb out of a CHA even when an opponent is close to finishing', () => {
     const decision = decide(gouChaQuery(cards(FIVE, FIVE, FIVE, KING), FIVE, 1, null, { 3: cards(TEN, JACK) }));
-    expect(decision.action).toMatchObject({ kind: 'ADD_GOUCHA', addition: 'CHA' });
+    expect(decision.kind).toBe('DECLINE_GOUCHA');
   });
 
   it('declines a GOU that would split its own bomb', () => {
@@ -243,5 +234,41 @@ describe('basic AI strategy: gou-cha', () => {
   it('always takes a CHA that finishes its hand', () => {
     const decision = decide(gouChaQuery(cards(FIVE, FIVE), FIVE, 2, null));
     expect(decision.action).toMatchObject({ kind: 'ADD_GOUCHA', addition: 'CHA' });
+  });
+});
+
+describe('basic AI strategy: structure and lead details', () => {
+  it('spends the weakest whole bomb before breaking its 4A4 with a single ace', () => {
+    const decision = decide(responding(cards(FOUR, FOUR, ACE, SIX, ...times(NINE, 3)), table(KING), 1));
+    expect(decision.ranks).toEqual([NINE, NINE, NINE]);
+  });
+
+  it('takes over a threatened teammate only with a card outside its bombs', () => {
+    const decision = decide(responding(cards(FIVE, FIVE, FIVE, KING), table(FOUR), 2, { 1: cards(ACE, ACE) }));
+    expect(decision.ranks).toEqual([KING]);
+  });
+
+  it('declines gou-cha on a teammate single even when an opponent is close to finishing', () => {
+    const decision = decide(gouChaQuery(cards(FIVE, FIVE, KING), FIVE, 2, null, { 1: cards(TEN, JACK) }));
+    expect(decision.kind).toBe('DECLINE_GOUCHA');
+  });
+
+  it('leads a pair that starts close to its lowest single', () => {
+    const decision = decide(freeLead(cards(THREE, FIVE, FIVE, NINE, KING)));
+    expect(decision.ranks).toEqual([FIVE, FIVE]);
+  });
+
+  it('does not lead a high pair while a lower single exists', () => {
+    const decision = decide(freeLead(cards(NINE, JACK, JACK, KING)));
+    expect(decision.ranks).toEqual([NINE]);
+  });
+
+  it.each([
+    ['a straight up to A', [NINE, NINE, QUEEN, KING, ACE, TWO]],
+    ['a long straight ending in A', [SEVEN, TEN, JACK, QUEEN, KING, ACE, TWO]],
+    ['a double straight of high pairs', [NINE, QUEEN, QUEEN, KING, KING, ACE, ACE]],
+  ] as const)('does not lead %s while a lower play exists', (_label, hand) => {
+    const decision = decide(freeLead(cards(...hand)));
+    expect(decision.ranks.some((rank) => rank >= ACE)).toBe(false);
   });
 });

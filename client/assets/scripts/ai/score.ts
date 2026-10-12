@@ -1,16 +1,24 @@
 import { Card, Rank } from '../core/cards/card';
+import { PlayPattern } from '../core/patterns/play-pattern';
 import { recognize } from '../core/patterns/recognize';
 import { GameAction } from '../core/state/game-action';
 import { AiObservation } from './ai-observation';
 
+/** A free-lead combo starting this many ranks above the lowest safe card still counts as low. */
+const LEAD_SPAN = 3;
+
 export interface CandidateScore {
   readonly finishesNow: number;
-  readonly blocksThreat: number;
-  /** Effective hand reduction after preserving bombs and a teammate's lead. */
+  /** Phase policy gate (see policyTier); a higher tier always wins. */
+  readonly tier: number;
+  /** Protected structures (3+ groups, joker bomb, 4A4) the action takes apart. */
+  readonly structuresBroken: number;
+  /** Beating power spent; responses and forced bomb leads use the weakest. */
+  readonly strength: number;
+  /** Free-lead rank bucket, so small cards go out first. */
+  readonly leadRank: number;
   readonly cardsRemoved: number;
   readonly shapeGain: number;
-  readonly teammatePenalty: number;
-  readonly specialCost: number;
   readonly highRankCost: number;
   readonly stableKey: string;
 }
@@ -28,17 +36,32 @@ function stableActionKey(action: GameAction): string {
   return `${action.kind}:${ids.join('|')}`;
 }
 
-function patternCost(pattern: ReturnType<typeof recognize>): number {
-  if (pattern.kind === 'JOKER_BOMB') return 8;
-  if (pattern.kind === 'FOUR_A_FOUR') return pattern.allHearts ? 7 : 6;
-  if (pattern.kind === 'N_OF_KIND_BOMB') {
-    if (pattern.count >= 5) return pattern.count + 2;
-    return pattern.count;
-  }
-  return 0;
+function isBombClass(pattern: PlayPattern): boolean {
+  return pattern.kind === 'N_OF_KIND_BOMB' || pattern.kind === 'JOKER_BOMB' || pattern.kind === 'FOUR_A_FOUR';
 }
 
-function patternShapeGain(pattern: ReturnType<typeof recognize>): number {
+/** Total order of beating power: ordinary < N of a kind (count, rank) < joker bomb < 4A4 < heart 4A4. */
+function patternStrength(pattern: PlayPattern): number {
+  switch (pattern.kind) {
+    case 'SINGLE':
+    case 'PAIR':
+      return pattern.rank;
+    case 'STRAIGHT':
+    case 'DOUBLE_STRAIGHT':
+    case 'TRIPLE_STRAIGHT':
+      return pattern.high;
+    case 'N_OF_KIND_BOMB':
+      return 20 + pattern.count * 16 + pattern.rank;
+    case 'JOKER_BOMB':
+      return 200;
+    case 'FOUR_A_FOUR':
+      return pattern.allHearts ? 202 : 201;
+    default:
+      return 0;
+  }
+}
+
+function patternShapeGain(pattern: PlayPattern): number {
   if (
     pattern.kind === 'STRAIGHT'
     || pattern.kind === 'DOUBLE_STRAIGHT'
@@ -53,21 +76,44 @@ function rankCost(card: Card): number {
   return card.rank - Rank.THREE;
 }
 
-function isTakeover(action: GameAction, observation: AiObservation): boolean {
-  return action.kind === 'PLAY_CARDS' && observation.phase === 'RESPONDING'
-    || action.kind === 'ADD_GOUCHA' && observation.phase === 'GOUCHA_QUERY';
+function rankCounts(cards: readonly Card[]): Map<Rank, number> {
+  const counts = new Map<Rank, number>();
+  for (const card of cards) counts.set(card.rank, (counts.get(card.rank) ?? 0) + 1);
+  return counts;
 }
 
-function threatScore(observation: AiObservation, action: GameAction): number {
-  if (!isTakeover(action, observation)) return 0;
-  const opponents = observation.publicPlayers.filter((player) =>
-    player.teamId !== observation.teamId && player.playerId !== observation.playerId,
+function holds(counts: ReadonlyMap<Rank, number>, rank: Rank, count: number): boolean {
+  return (counts.get(rank) ?? 0) >= count;
+}
+
+function hasJokerBomb(counts: ReadonlyMap<Rank, number>): boolean {
+  return holds(counts, Rank.SMALL_JOKER, 1) && holds(counts, Rank.BIG_JOKER, 1);
+}
+
+function hasFourAFour(counts: ReadonlyMap<Rank, number>): boolean {
+  return holds(counts, Rank.FOUR, 2) && holds(counts, Rank.ACE, 1);
+}
+
+/** Count protected structures that shrink or vanish, unless the play is exactly that structure. */
+function countBrokenStructures(hand: readonly Card[], played: readonly Card[], pattern: PlayPattern): number {
+  const before = rankCounts(hand);
+  const after = new Map(before);
+  for (const card of played) after.set(card.rank, (after.get(card.rank) ?? 0) - 1);
+  let broken = 0;
+  for (const [rank, count] of before) {
+    if (rank > Rank.TWO || count < 3) continue;
+    const left = after.get(rank) ?? 0;
+    if (left < count && !(left === 0 && played.length === count)) broken += 1;
+  }
+  if (hasJokerBomb(before) && !hasJokerBomb(after) && pattern.kind !== 'JOKER_BOMB') broken += 1;
+  if (hasFourAFour(before) && !hasFourAFour(after) && pattern.kind !== 'FOUR_A_FOUR') broken += 1;
+  return broken;
+}
+
+function opponentThreat(observation: AiObservation): boolean {
+  return observation.publicPlayers.some((player) =>
+    player.teamId !== observation.teamId && player.remaining >= 1 && player.remaining <= 3,
   );
-  const threat = opponents
-    .map((player) => player.remaining)
-    .filter((remaining) => remaining >= 1 && remaining <= 3)
-    .reduce((smallest, remaining) => Math.min(smallest, remaining), Number.POSITIVE_INFINITY);
-  return Number.isFinite(threat) ? 4 - threat : 0;
 }
 
 function holderIsTeammate(observation: AiObservation): boolean {
@@ -77,14 +123,54 @@ function holderIsTeammate(observation: AiObservation): boolean {
     && observation.publicPlayers[holderId]?.teamId === observation.teamId;
 }
 
+/**
+ * Free lead: 1 keeps every structure, 0 otherwise.
+ * Opponent holds: 3 safe beat or join, 2 bomb or break when nothing safe beats, 1 pass/decline,
+ * 0 a gou-cha join that splits its own bomb.
+ * Teammate holds: 2 safe takeover on a threat or big shape gain, 1 pass/decline, 0 otherwise.
+ */
+function policyTier(observation: AiObservation, action: GameAction, risky: boolean, shapeGain: number): number {
+  if (action.kind === 'PASS' || action.kind === 'DECLINE_GOUCHA') return 1;
+  if (observation.phase === 'FREE_LEAD') return risky ? 0 : 1;
+  if (holderIsTeammate(observation)) {
+    if (action.kind === 'ADD_GOUCHA' || risky) return 0;
+    return opponentThreat(observation) || shapeGain >= 3 ? 2 : 0;
+  }
+  if (!risky) return 3;
+  return action.kind === 'ADD_GOUCHA' ? 0 : 2;
+}
+
+/** Lowest rank that can be led alone without breaking a protected structure. */
+function lowestSafeRank(hand: readonly Card[]): number {
+  for (let rank = Rank.THREE; rank <= Rank.BIG_JOKER; rank += 1) {
+    const card = hand.find((candidate) => candidate.rank === rank);
+    if (card !== undefined && countBrokenStructures(hand, [card], recognize([card])) === 0) return rank;
+  }
+  return Rank.BIG_JOKER;
+}
+
+/**
+ * Low cards lead first; a combo starting within LEAD_SPAN of the lowest safe card ties with it,
+ * unless it spends an A, 2, joker or a pair of J or higher.
+ */
+function leadRank(hand: readonly Card[], played: readonly Card[], pattern: PlayPattern): number {
+  const lowest = lowestSafeRank(hand);
+  const low = Math.min(...played.map((card) => card.rank));
+  const highLead = played.some((card) => card.rank >= Rank.ACE)
+    || (pattern.kind === 'PAIR' && pattern.rank >= Rank.JACK);
+  if (low === lowest || (low <= lowest + LEAD_SPAN && !highLead)) return lowest;
+  return low + LEAD_SPAN;
+}
+
 function semanticValues(score: CandidateScore): readonly number[] {
   return [
     score.finishesNow,
-    score.blocksThreat,
-    -score.teammatePenalty,
+    score.tier,
+    -score.structuresBroken,
+    -score.strength,
+    -score.leadRank,
     score.cardsRemoved,
     score.shapeGain,
-    -score.specialCost,
     -score.highRankCost,
   ];
 }
@@ -102,29 +188,22 @@ export function compareCandidateScores(left: CandidateScore, right: CandidateSco
 export function scoreCandidate(observation: AiObservation, action: GameAction): CandidateScore {
   const cards = actionCards(observation, action);
   const pattern = recognize(cards);
-  const finishing = (action.kind === 'PLAY_CARDS' || action.kind === 'ADD_GOUCHA')
-    && observation.ownHand.length > 0
-    && cards.length === observation.ownHand.length;
-  const blocksThreat = threatScore(observation, action);
-  const rawShapeGain = patternShapeGain(pattern)
-    + (action.kind === 'ADD_GOUCHA' ? 1 : 0);
-  const takesTeammateLead = isTakeover(action, observation) && holderIsTeammate(observation);
-  const significantImprovement = rawShapeGain >= 3;
-  const teammatePenalty = takesTeammateLead && !finishing && blocksThreat === 0 && !significantImprovement ? 1 : 0;
-  const specialCost = patternCost(pattern);
-  const actualCardsRemoved = action.kind === 'PLAY_CARDS' || action.kind === 'ADD_GOUCHA' ? cards.length : 0;
-  const cardsRemoved = teammatePenalty > 0
-    ? 0
-    : Math.max(0, actualCardsRemoved - (observation.phase === 'FREE_LEAD' ? specialCost : 0));
-  const shapeGain = teammatePenalty > 0 ? 0 : rawShapeGain;
+  const playsCards = action.kind === 'PLAY_CARDS' || action.kind === 'ADD_GOUCHA';
+  const finishing = playsCards && observation.ownHand.length > 0 && cards.length === observation.ownHand.length;
+  const structuresBroken = playsCards ? countBrokenStructures(observation.ownHand, cards, pattern) : 0;
+  const risky = (action.kind === 'PLAY_CARDS' && isBombClass(pattern)) || structuresBroken > 0;
+  const shapeGain = patternShapeGain(pattern) + (action.kind === 'ADD_GOUCHA' ? 1 : 0);
+  const tier = policyTier(observation, action, risky, shapeGain);
+  const safeLead = observation.phase === 'FREE_LEAD' && tier > 0;
 
   return {
     finishesNow: finishing ? 1 : 0,
-    blocksThreat,
-    cardsRemoved,
+    tier,
+    structuresBroken,
+    strength: safeLead ? 0 : patternStrength(pattern),
+    leadRank: safeLead ? leadRank(observation.ownHand, cards, pattern) : 0,
+    cardsRemoved: cards.length,
     shapeGain,
-    teammatePenalty,
-    specialCost,
     highRankCost: cards.reduce((total, card) => total + rankCost(card), 0),
     stableKey: stableActionKey(action),
   };
