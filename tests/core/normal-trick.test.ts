@@ -149,18 +149,18 @@ describe('normal play', () => {
     expect(afterSeat3Beats.trick?.holderId).toBe(3);
   });
 
-  it('resets after every other active player passes and grants next active lead', () => {
+  it('resets after every other active player passes and returns the lead to the trick winner', () => {
     const lead = dispatch(responseState(), { kind: 'PASS', playerId: 1 });
     const pass2 = dispatch(lead, { kind: 'PASS', playerId: 2 });
     const finalPass = expectSuccess(applyAction(pass2, { kind: 'PASS', playerId: 3 }));
     const reset = finalPass.state;
     expect(reset.phase).toBe('FREE_LEAD');
-    expect(reset.currentPlayer).toBe(1);
+    expect(reset.currentPlayer).toBe(0);
     expect(reset.trick).toBeNull();
     expect(finalPass.events).toContainEqual({ kind: 'TRICK_RESET' });
   });
 
-  it('skips finished seats for response and next free lead', () => {
+  it('skips finished seats for response and lends a finished winner\'s lead to their partner', () => {
     const state = responseState({
       currentPlayer: 2,
       finishOrder: [1],
@@ -182,6 +182,20 @@ describe('normal play', () => {
       dispatch(dispatch(resetFixture, { kind: 'PASS', playerId: 1 }), { kind: 'PASS', playerId: 2 }),
       { kind: 'PASS', playerId: 0 },
     );
+    expect(reset.phase).toBe('FREE_LEAD');
+    expect(reset.currentPlayer).toBe(1);
+  });
+
+  it('gives a finished winner\'s lead to the next active seat when their partner has also finished', () => {
+    const state = responseState({
+      currentPlayer: 2,
+      finishOrder: [3, 1],
+      hands: { 0: [c('9x', Rank.NINE)], 1: [], 2: [c('9y', Rank.NINE)], 3: [] },
+      currentPlay: currentSingle('table-six', Rank.SIX, 3),
+      holderId: 3,
+      passedPlayerIds: [],
+    });
+    const reset = dispatch(dispatch(state, { kind: 'PASS', playerId: 2 }), { kind: 'PASS', playerId: 0 });
     expect(reset.phase).toBe('FREE_LEAD');
     expect(reset.currentPlayer).toBe(0);
   });
