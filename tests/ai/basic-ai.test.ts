@@ -85,7 +85,7 @@ describe('basic AI action selection', () => {
     const state = buildFreeLead([...sameRank(Rank.THREE, 3), ...sameRank(Rank.FOUR, 1)]);
     const action = chooseBasicAiAction(buildObservation(state, 0));
     expect(action.kind).toBe('PLAY_CARDS');
-    if (action.kind === 'PLAY_CARDS') expect(action.cardIds).toHaveLength(2);
+    if (action.kind === 'PLAY_CARDS') expect(action.cardIds).toEqual([state.players[0].hand[3]!.id]);
     assertAccepted(state, action);
   });
 
