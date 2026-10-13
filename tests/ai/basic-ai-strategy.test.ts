@@ -180,6 +180,70 @@ describe('basic AI strategy: teammate holds the play', () => {
   });
 });
 
+describe('basic AI strategy: one deck, teammate holds, judged by public card counting', () => {
+  /**
+   * One deck, seat 2 (the teammate) holds the play and seat 1 (an opponent) is close to finishing. Every card
+   * outside the four hands counts as played, so the cards the AI has not seen are exactly the other hands.
+   */
+  function oneDeckTeammateHolds(
+    hand: readonly Card[],
+    tablePlay: readonly Card[],
+    opponents: Record<1 | 3, Card[]>,
+  ): GameState {
+    return buildState({
+      deckCount: 1,
+      phase: 'RESPONDING',
+      currentPlayer: 0,
+      hands: { 0: hand, 1: opponents[1], 2: cards(EIGHT, JACK, QUEEN), 3: opponents[3] },
+      currentPlay: group(tablePlay, 2, 1),
+      holderId: 2,
+    });
+  }
+
+  it('lets a teammate single stand when no unseen card can beat it', () => {
+    // The other three 2s and both jokers are played, so nothing can beat the teammate's ace.
+    const decision = decide(oneDeckTeammateHolds(cards(TWO, FIVE, SIX), table(ACE), {
+      1: cards(SEVEN),
+      3: cards(EIGHT, TEN, JACK, QUEEN, KING),
+    }));
+    expect(decision.kind).toBe('PASS');
+  });
+
+  it('still takes over when an unseen card could beat the teammate single', () => {
+    const decision = decide(oneDeckTeammateHolds(cards(TWO, FIVE, SIX), table(ACE), {
+      1: cards(SEVEN),
+      3: cards(EIGHT, TEN, JACK, QUEEN, TWO),
+    }));
+    expect(decision.ranks).toEqual([TWO]);
+  });
+
+  it('lets a teammate pair stand when no higher pair can be unseen', () => {
+    // It holds two aces and the other two are played; one deck has a single 2 left and no joker pair.
+    const decision = decide(oneDeckTeammateHolds(cards(ACE, ACE, FIVE, SIX), table(KING, KING), {
+      1: cards(SEVEN),
+      3: cards(EIGHT, TEN, JACK, QUEEN, TWO),
+    }));
+    expect(decision.kind).toBe('PASS');
+  });
+
+  it('takes over with the play that starts a go-out plan instead of the weakest beat', () => {
+    // Nothing unseen beats the 2, and 10-J-Q then goes out as one play; the weakest beat, the 10, plans nothing.
+    const decision = decide(oneDeckTeammateHolds(cards(TEN, JACK, QUEEN, TWO), table(NINE), {
+      1: cards(SEVEN, EIGHT),
+      3: cards(TEN, JACK, QUEEN, KING, ACE),
+    }));
+    expect(decision.ranks).toEqual([TWO]);
+  });
+
+  it('takes over with the weakest beat when no takeover starts a go-out plan', () => {
+    const decision = decide(oneDeckTeammateHolds(cards(TEN, JACK, FIVE, TWO), table(NINE), {
+      1: cards(SEVEN, EIGHT),
+      3: cards(TEN, JACK, QUEEN, KING, ACE),
+    }));
+    expect(decision.ranks).toEqual([TEN]);
+  });
+});
+
 describe('basic AI strategy: free lead', () => {
   it('leads low cards before a pair of twos', () => {
     const decision = decide(freeLead(cards(THREE, SEVEN, NINE, TWO, TWO, KING)));

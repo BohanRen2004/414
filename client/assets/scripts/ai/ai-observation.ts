@@ -1,4 +1,5 @@
 import { Card, PlayerId, Rank, TeamId } from '../core/cards/card';
+import { createDeck, DEFAULT_DECK_COUNT, DeckCount } from '../core/cards/deck';
 import { CardGroup } from '../core/patterns/play-pattern';
 import { GamePhase, GameResult, GameState, PublicActionRecord } from '../core/state/game-state';
 import { canAddGouCha } from '../core/rules/goucha';
@@ -22,6 +23,10 @@ export interface AiObservation {
   /** Latest public contributor to the trick: the current play's owner, or during a chain the last CHA/GOU player. */
   readonly holderId: PlayerId | null;
   readonly publicPlayedCardIds: readonly string[];
+  /** Game version (public): each ordinary rank has 4 copies per deck and each joker 1, so the AI can count cards. */
+  readonly deckCount: DeckCount;
+  /** Public card count: played cards (plays, CHA and GOU) per rank, indexed by `Rank`. */
+  readonly publicPlayedRankCounts: readonly number[];
   readonly publicHistory: readonly PublicActionRecord[];
   readonly result: GameResult | null;
   /** Tie-break value hashed from this seat's public view only, so it cannot reveal the deal. */
@@ -47,6 +52,19 @@ function hashPublicView(text: string): number {
 /** Canonical order, so the shuffled deal order of the hand never reaches the AI. */
 function compareCards(left: Card, right: Card): number {
   return left.rank - right.rank || left.suit - right.suit || left.deckIndex - right.deckIndex;
+}
+
+/** Rank of every physical card ID; one deck is exactly the first deck of two, so one table serves both versions. */
+const RANK_BY_CARD_ID: ReadonlyMap<string, Rank> = new Map(createDeck(2).map((card) => [card.id, card.rank]));
+
+/** Played cards are face up, so counting them by rank reveals nothing hidden. */
+function countPlayedRanks(playedCardIds: readonly string[]): number[] {
+  const counts = new Array<number>(Rank.BIG_JOKER + 1).fill(0);
+  for (const id of playedCardIds) {
+    const rank = RANK_BY_CARD_ID.get(id);
+    if (rank !== undefined) counts[rank] = (counts[rank] ?? 0) + 1;
+  }
+  return counts;
 }
 
 /** Build a detached, information-safe view for one seat. */
@@ -92,6 +110,8 @@ export function buildObservation(state: GameState, playerId: PlayerId): AiObserv
       actionNumber: state.trick.currentPlay.actionNumber,
     },
     publicPlayedCardIds: [...state.playedCardIds],
+    deckCount: state.deckCount ?? DEFAULT_DECK_COUNT,
+    publicPlayedRankCounts: countPlayedRanks(state.playedCardIds),
     publicHistory: state.publicHistory.map((record) => ({ ...record, cardIds: [...record.cardIds] })),
     result: state.result === null ? null : {
       ...state.result,

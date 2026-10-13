@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildObservation } from '../../client/assets/scripts/ai/ai-observation';
 import { chooseBasicAiAction } from '../../client/assets/scripts/ai/basic-ai';
 import { Card, PlayerId, Rank } from '../../client/assets/scripts/core/cards/card';
-import { dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
+import { createDeck, dealFourPlayers, DeckCount } from '../../client/assets/scripts/core/cards/deck';
 import { XorShift32 } from '../../client/assets/scripts/core/random/prng';
 import { applyAction, createSetupState } from '../../client/assets/scripts/core/rules/reducer';
 import { GameState } from '../../client/assets/scripts/core/state/game-state';
@@ -10,8 +10,8 @@ import { c } from '../helpers/cards';
 import { dispatch, expectSuccess } from '../helpers/actions';
 import { buildState } from '../helpers/state-builder';
 
-function allAiGameAfter(seed: number, actions: number): GameState {
-  const started = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed })).state;
+function allAiGameAfter(seed: number, actions: number, deckCount: DeckCount = 2): GameState {
+  const started = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed, deckCount })).state;
   let state: GameState = {
     ...started,
     players: started.players.map((player) => ({ ...player, controlType: 'BASIC_AI' })) as unknown as GameState['players'],
@@ -76,11 +76,13 @@ describe('AI observation privacy', () => {
     expect(observation.decisionRandom).toBeGreaterThanOrEqual(0);
   });
 
-  it('stays identical when only the deal seed or other players\' cards differ', () => {
-    const otherDeal = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed: 99 })).state;
+  const versions = [['one deck', 1], ['two decks', 2]] as const;
+
+  it.each(versions)('stays identical when only the deal seed or other players\' cards differ (%s)', (_label, deckCount) => {
+    const otherDeal = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed: 99, deckCount })).state;
     for (const seed of [414, 2026, 77]) {
       for (const actions of [0, 5, 12]) {
-        const state = allAiGameAfter(seed, actions);
+        const state = allAiGameAfter(seed, actions, deckCount);
         for (const viewer of [0, 1, 2, 3] as const) {
           const hidden: GameState = {
             ...redealHiddenCards(state, viewer, seed + actions + viewer),
@@ -93,6 +95,21 @@ describe('AI observation privacy', () => {
         }
       }
     }
+  });
+
+  it.each(versions)('gives the deck version and counts the played cards by rank (%s)', (_label, deckCount) => {
+    const state = allAiGameAfter(414, 12, deckCount);
+    const observation = buildObservation(state, 0);
+    const rankOf = new Map(createDeck(deckCount).map((card) => [card.id, card.rank]));
+    const expected = new Array<number>(Rank.BIG_JOKER + 1).fill(0);
+    for (const id of state.playedCardIds) {
+      const rank = rankOf.get(id)!;
+      expected[rank] = expected[rank]! + 1;
+    }
+
+    expect(observation.deckCount).toBe(deckCount);
+    expect(state.playedCardIds.length).toBeGreaterThan(0);
+    expect(observation.publicPlayedRankCounts).toEqual(expected);
   });
 
   it('does not reveal the dealt order of its own hand', () => {
