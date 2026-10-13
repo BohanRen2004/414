@@ -160,6 +160,13 @@ describe('normal play', () => {
     expect(finalPass.events).toContainEqual({ kind: 'TRICK_RESET' });
   });
 
+  it('gives the next free lead to a responder who took the trick', () => {
+    let state = dispatch(responseState(), { kind: 'PLAY_CARDS', playerId: 1, cardIds: ['4a'] });
+    for (const playerId of [2, 3, 0] as const) state = dispatch(state, { kind: 'PASS', playerId });
+    expect(state.phase).toBe('FREE_LEAD');
+    expect(state.currentPlayer).toBe(1);
+  });
+
   it('skips finished seats for response and lends a finished winner\'s lead to their partner', () => {
     const state = responseState({
       currentPlayer: 2,

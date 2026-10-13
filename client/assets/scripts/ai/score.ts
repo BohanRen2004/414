@@ -4,12 +4,9 @@ import { recognize } from '../core/patterns/recognize';
 import { GameAction } from '../core/state/game-action';
 import { AiObservation } from './ai-observation';
 
-/** A free-lead combo starting this many ranks above the lowest safe card still counts as low. */
-const LEAD_SPAN = 3;
-
 export interface CandidateScore {
   readonly finishesNow: number;
-  /** Phase policy gate (see policyTier); a higher tier always wins. */
+  /** Phase policy gate (see policyTier); after finishesNow, a higher tier always wins. */
   readonly tier: number;
   /** Protected structures (3+ groups, joker bomb, 4A4) the action takes apart. */
   readonly structuresBroken: number;
@@ -149,17 +146,11 @@ function lowestSafeRank(hand: readonly Card[]): number {
   return Rank.BIG_JOKER;
 }
 
-/**
- * Low cards lead first; a combo starting within LEAD_SPAN of the lowest safe card ties with it,
- * unless it spends an A, 2, joker or a pair of J or higher.
- */
-function leadRank(hand: readonly Card[], played: readonly Card[], pattern: PlayPattern): number {
-  const lowest = lowestSafeRank(hand);
+/** Lowest starting rank leads first; plays that spend an A, 2 or joker wait while any other safe lead exists. */
+function leadRank(hand: readonly Card[], played: readonly Card[]): number {
   const low = Math.min(...played.map((card) => card.rank));
-  const highLead = played.some((card) => card.rank >= Rank.ACE)
-    || (pattern.kind === 'PAIR' && pattern.rank >= Rank.JACK);
-  if (low === lowest || (low <= lowest + LEAD_SPAN && !highLead)) return lowest;
-  return low + LEAD_SPAN;
+  const spendsTopCard = played.some((card) => card.rank >= Rank.ACE);
+  return spendsTopCard && lowestSafeRank(hand) < Rank.ACE ? Rank.BIG_JOKER + 1 + low : low;
 }
 
 function semanticValues(score: CandidateScore): readonly number[] {
@@ -192,7 +183,7 @@ export function scoreCandidate(observation: AiObservation, action: GameAction): 
   const finishing = playsCards && observation.ownHand.length > 0 && cards.length === observation.ownHand.length;
   const structuresBroken = playsCards ? countBrokenStructures(observation.ownHand, cards, pattern) : 0;
   const risky = (action.kind === 'PLAY_CARDS' && isBombClass(pattern)) || structuresBroken > 0;
-  const shapeGain = patternShapeGain(pattern) + (action.kind === 'ADD_GOUCHA' ? 1 : 0);
+  const shapeGain = patternShapeGain(pattern);
   const tier = policyTier(observation, action, risky, shapeGain);
   const safeLead = observation.phase === 'FREE_LEAD' && tier > 0;
 
@@ -201,7 +192,7 @@ export function scoreCandidate(observation: AiObservation, action: GameAction): 
     tier,
     structuresBroken,
     strength: safeLead ? 0 : patternStrength(pattern),
-    leadRank: safeLead ? leadRank(observation.ownHand, cards, pattern) : 0,
+    leadRank: safeLead ? leadRank(observation.ownHand, cards) : 0,
     cardsRemoved: cards.length,
     shapeGain,
     highRankCost: cards.reduce((total, card) => total + rankCost(card), 0),

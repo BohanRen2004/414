@@ -81,8 +81,8 @@ describe('basic AI action selection', () => {
     assertAccepted(state, action);
   });
 
-  it('leads ordinary cards instead of spending a three-card bomb', () => {
-    const state = buildFreeLead([...sameRank(Rank.THREE, 3), ...sameRank(Rank.FOUR, 1)]);
+  it('leads a loose card instead of spending or splitting 4A4', () => {
+    const state = buildFreeLead([...sameRank(Rank.FOUR, 2), ...sameRank(Rank.ACE, 1), ...sameRank(Rank.SEVEN, 1)]);
     const action = chooseBasicAiAction(buildObservation(state, 0));
     expect(action.kind).toBe('PLAY_CARDS');
     if (action.kind === 'PLAY_CARDS') expect(action.cardIds).toEqual([state.players[0].hand[3]!.id]);

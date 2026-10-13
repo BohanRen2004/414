@@ -258,6 +258,20 @@ describe('corrected single-card gou-cha', () => {
     expect(result.trick?.holderId).toBe(1);
   });
 
+  it('lends the next free lead to the partner of a holder who went out on a CHA', () => {
+    let state = startSingleFive({
+      0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE)],
+      2: [c('2-gou', Rank.FIVE), c('2-six', Rank.SIX)],
+      3: [c('3-seven', Rank.SEVEN)],
+    });
+    state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
+    state = dispatch(state, { kind: 'DECLINE_GOUCHA', playerId: 2 });
+    for (const playerId of [2, 3, 0] as const) state = dispatch(state, { kind: 'PASS', playerId });
+    expect(state.phase).toBe('FREE_LEAD');
+    expect(state.currentPlayer).toBe(3);
+  });
+
   it('finishes a last-card GOU while keeping its card in the chain aggregate', () => {
     let state = startSingleFive({
       0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
