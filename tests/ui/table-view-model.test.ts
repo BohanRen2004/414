@@ -98,6 +98,8 @@ describe('table view model', () => {
     expect(vm.gouCha?.suggestedCardIds).toHaveLength(2);
     expect(vm.center.contributions).toEqual([{ playerId: 0, label: '出牌', cardIds: ['base-five'] }]);
     expect(vm.controls).toMatchObject({ showPlay: false, showPass: false, showHint: false });
+    const picked = buildTableViewModel(state, humanInput(vm.gouCha!.suggestedCardIds, 1));
+    expect(picked.controls.errorKey).toBeNull();
 
     const gouBase = group([card('gou-base-five', Rank.FIVE)], 0, 1);
     const gouState = buildState({

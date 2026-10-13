@@ -116,7 +116,11 @@ describe('state visible to one seat', () => {
     });
     const atViewer = dispatch(afterCha, { kind: 'DECLINE_GOUCHA', playerId: 3 });
     expect(atViewer).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 0 });
-    expect(visibleStateFor(atViewer, 0)).toBe(atViewer);
+    expect(atViewer.trick?.gouCha?.declinedPlayerIds).toEqual([3]);
+    expect(visibleStateFor(atViewer, 0)).toEqual({
+      ...atViewer,
+      trick: { ...atViewer.trick!, gouCha: { ...atViewer.trick!.gouCha!, queryCursor: 0, declinedPlayerIds: [] } },
+    });
     const declined = dispatch(atViewer, { kind: 'DECLINE_GOUCHA', playerId: 0 });
     expect(declined).toMatchObject({ phase: 'FREE_LEAD', currentPlayer: 2, trick: null });
     const pending = gouChaPendingFrame(atViewer, declined);
@@ -148,9 +152,9 @@ describe('state visible to one seat', () => {
     expect(gouChaPendingFrame(lastCha, ended)).toBeNull();
   });
 
-  it('leaves the viewer\'s own query and every other phase untouched', () => {
+  it('shows the viewer its own query without earlier declines and leaves every other phase untouched', () => {
     const queried = queriedAfterLead();
-    expect(visibleStateFor(queried, 2)).toBe(queried);
+    expect(visibleStateFor(queried, 2)).toEqual(queried);
     expect(hidesGouChaQuery(queried, 2)).toBe(false);
 
     const responding = declineUntilClosed(queried);

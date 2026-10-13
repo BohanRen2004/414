@@ -172,14 +172,17 @@ export class BrowserGameSession {
     if (this.busy) return false;
     this.busy = true;
     this.errorCode = null;
+    // Clear the selection before AI turns are shown, so they never display cards the human already used.
+    const selection = this.ui;
+    this.ui = clearSelection(this.ui);
     this.publish();
     try {
       const result = await this.controller.dispatch(action);
       if (!result.ok) {
+        this.ui = selection;
         this.errorCode = result.error.code;
         return false;
       }
-      this.ui = clearSelection(this.ui);
       return true;
     } finally {
       this.busy = false;

@@ -152,6 +152,8 @@ function patternErrorKey(code: PatternErrorCode): string {
 function selectedPlayStatus(state: GameState, input: HumanUiState): { readonly enabled: boolean; readonly errorKey: string | null } {
   if (input.selectedCardIds.length === 0) return { enabled: false, errorKey: null };
   if (state.currentPlayer !== input.humanPlayerId) return { enabled: false, errorKey: 'rule.not_current_player' };
+  // A gou-cha prompt validates its own selection; the play controls are simply not in use.
+  if (state.phase === 'GOUCHA_QUERY') return { enabled: false, errorKey: null };
   if (state.phase !== 'FREE_LEAD' && state.phase !== 'RESPONDING') {
     return { enabled: false, errorKey: 'rule.wrong_phase' };
   }

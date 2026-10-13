@@ -84,6 +84,8 @@ function phaseMessage(snapshot: BrowserSessionSnapshot): string {
     const addition = state.trick?.gouCha?.nextAddition;
     return addition === 'CHA' ? '轮到你岔：选同点数的一对牌' : '轮到你勾：选同点数的一张牌';
   }
+  // While earlier moves are still being shown, the human's turn is not open yet (it may still be pre-empted by a 岔).
+  if (state.currentPlayer === 0 && snapshot.isBusy && (state.phase === 'FREE_LEAD' || state.phase === 'RESPONDING')) return '等待其他玩家…';
   if (state.currentPlayer === 0 && state.phase === 'FREE_LEAD') return '轮到你自由出牌';
   if (state.currentPlayer === 0 && state.phase === 'RESPONDING') return '轮到你压牌，或选择不出';
   return state.currentPlayer === null ? '正在准备牌局' : `${playerName(state.currentPlayer)}思考中`;
@@ -218,7 +220,7 @@ function renderControls(snapshot: BrowserSessionSnapshot): string {
         <button class="button button-primary" data-action="play" ${!controls.playEnabled || snapshot.isBusy ? 'disabled' : ''}>出牌 <kbd>↵</kbd></button>
       </div>`;
   return `<div class="hand-controls">
-    <div class="selection-caption"><span>${picked.length ? `已选 ${picked.length} 张` : '点击手牌选择'}</span><span>${snapshot.state.currentPlayer === 0 && snapshot.state.phase === 'RESPONDING' ? '可压牌或不出' : ''}</span></div>
+    <div class="selection-caption"><span>${picked.length ? `已选 ${picked.length} 张` : '点击手牌选择'}</span><span>${snapshot.state.currentPlayer === 0 && snapshot.state.phase === 'RESPONDING' && !snapshot.isBusy ? '可压牌或不出' : ''}</span></div>
     ${actionButtons}
     <p class="inline-error" role="status">${escapeHtml(error)}</p>
   </div>`;

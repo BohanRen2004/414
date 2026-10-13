@@ -37,14 +37,19 @@ function pendingView(state: GameState, chain: GouChaChain): GameState {
 }
 
 /**
- * The state as one seat may see it; the viewer's own query and every other state are returned as is.
+ * The state as one seat may see it; states without a gou-cha query are returned as is, and the viewer's
+ * own query only loses who declined before it.
  * Another seat's query on a single nobody has CHA'd yet looks like the ordinary response it closes into
  * when nobody joins: the single on the table and the seat after its player to respond. Once a CHA has
  * happened, another seat's query looks like the neutral pending frame.
  */
 export function visibleStateFor(state: GameState, viewerId: PlayerId): GameState {
   const chain = state.trick?.gouCha;
-  if (!hidesGouChaQuery(state, viewerId) || state.trick === null || chain === null || chain === undefined) return state;
+  if (state.trick === null || chain === null || chain === undefined) return state;
+  if (!hidesGouChaQuery(state, viewerId)) {
+    // The viewer's own prompt: it may know it is being asked, not who declined before it.
+    return { ...state, trick: { ...state.trick, gouCha: { ...chain, queryCursor: viewerId, declinedPlayerIds: [] } } };
+  }
   if (chain.additions.length > 0) return pendingView(state, chain);
   const nextResponder = nextActivePlayer(state.players, chain.holderId);
   return {

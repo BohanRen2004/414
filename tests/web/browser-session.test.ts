@@ -46,6 +46,24 @@ describe('browser game session', () => {
     expect(session.state.publicHistory[0]?.kind).toBe('PLAY_CARDS');
   });
 
+  it('clears the human selection before AI turns are shown and keeps it when the play is rejected', async () => {
+    const session = new BrowserGameSession(seedWithHumanLead(), { animationDelayMs: 0 });
+    await session.start();
+    const leadCard = session.state.players[0].hand[0]!;
+    const busySelections: (readonly string[])[] = [];
+    session.subscribe((snapshot) => {
+      if (snapshot.isBusy) busySelections.push(snapshot.selectedCardIds);
+    });
+
+    session.toggleCard(leadCard.id);
+    expect(await session.pass()).toBe(false);
+    expect(session.selectedCardIds).toEqual([leadCard.id]);
+
+    expect(await session.playSelection()).toBe(true);
+    expect(busySelections.length).toBeGreaterThan(0);
+    expect(busySelections.every((selected) => selected.length === 0)).toBe(true);
+  });
+
   it('rejects Pass during a free lead without mutating the authoritative state', async () => {
     const session = new BrowserGameSession(seedWithHumanLead(), { animationDelayMs: 0 });
     await session.start();
@@ -96,7 +114,7 @@ describe('browser game session', () => {
         try {
           expect(session.snapshot().state).toEqual(snapshot.state);
           expect(session.viewModel).toEqual(snapshot.viewModel);
-          if (snapshot.state !== session.state) {
+          if (snapshot.state.phase !== session.state.phase || snapshot.state.currentPlayer !== session.state.currentPlayer) {
             maskedScreens += 1;
             expect(snapshot.isBusy).toBe(true);
           }
