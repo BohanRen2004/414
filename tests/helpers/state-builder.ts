@@ -216,7 +216,7 @@ export function buildState(fixture: StateFixture): GameState {
     throw new Error('Fixture card IDs do not form a unique complete physical deck');
   }
   const state: GameState = {
-    rulesVersion: '1.0.0',
+    rulesVersion: '1.1.0',
     phase: fixture.phase,
     rootSeed: seed,
     randomState: setupDeal === null ? null : { deal: setupDeal.dealStateAfterSetup },

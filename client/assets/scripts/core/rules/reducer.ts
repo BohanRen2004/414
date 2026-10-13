@@ -27,7 +27,7 @@ function createPlayer(playerId: PlayerId, hand: PlayerState['hand'] = []): Playe
 
 export function createSetupState(): GameState {
   return {
-    rulesVersion: '1.0.0',
+    rulesVersion: '1.1.0',
     phase: 'SETUP',
     rootSeed: null,
     randomState: null,
