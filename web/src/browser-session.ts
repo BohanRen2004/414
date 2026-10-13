@@ -100,12 +100,14 @@ export class BrowserGameSession {
   }
 
   public toggleCard(cardId: string): void {
+    if (this.busy) return;
     this.ui = toggleCard(this.ui, cardId, this.state.players[0].hand);
     this.errorCode = null;
     this.publish();
   }
 
   public clearSelection(): void {
+    if (this.busy) return;
     this.ui = clearSelection(this.ui);
     this.errorCode = null;
     this.publish();

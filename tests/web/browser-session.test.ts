@@ -86,25 +86,42 @@ describe('browser game session', () => {
       const initialState = buildState({ phase: 'FREE_LEAD', currentPlayer: 0, hands });
       const session = new BrowserGameSession(414, { animationDelayMs: 0, initialState });
       const screens: ReturnType<typeof screen>[] = [];
+      // The session swallows listener errors, so failures are collected and asserted afterwards.
+      const listenerErrors: unknown[] = [];
       let maskedScreens = 0;
+      let probing = false;
       session.subscribe((snapshot) => {
         screens.push(screen(snapshot));
-        expect(session.snapshot().state).toEqual(snapshot.state);
-        expect(session.viewModel).toEqual(snapshot.viewModel);
-        if (snapshot.state !== session.state) {
-          maskedScreens += 1;
-          expect(snapshot.isBusy).toBe(true);
+        if (probing) return;
+        try {
+          expect(session.snapshot().state).toEqual(snapshot.state);
+          expect(session.viewModel).toEqual(snapshot.viewModel);
+          if (snapshot.state !== session.state) {
+            maskedScreens += 1;
+            expect(snapshot.isBusy).toBe(true);
+          }
+          if (!snapshot.isBusy) return;
+          probing = true;
+          const published = screens.length;
+          const selected = session.selectedCardIds;
+          const firstCard = session.state.players[0].hand[0];
+          if (firstCard !== undefined) session.toggleCard(firstCard.id);
+          session.clearSelection();
+          session.cycleHint();
+          expect(session.selectedCardIds).toEqual(selected);
+          expect(screens).toHaveLength(published);
+          void session.pass().then((done) => expect(done).toBe(false)).catch((error) => listenerErrors.push(error));
+          void session.playSelection().then((done) => expect(done).toBe(false)).catch((error) => listenerErrors.push(error));
+          void session.submitGouCha().then((done) => expect(done).toBe(false)).catch((error) => listenerErrors.push(error));
+          void session.declineGouCha().then((done) => expect(done).toBe(false)).catch((error) => listenerErrors.push(error));
+        } catch (error) {
+          listenerErrors.push(error);
+        } finally {
+          probing = false;
         }
-        if (!snapshot.isBusy) return;
-        const published = screens.length;
-        session.cycleHint();
-        void session.pass().then((done) => expect(done).toBe(false));
-        void session.playSelection().then((done) => expect(done).toBe(false));
-        void session.submitGouCha().then((done) => expect(done).toBe(false));
-        void session.declineGouCha().then((done) => expect(done).toBe(false));
-        expect(screens).toHaveLength(published);
       });
       await act(session);
+      expect(listenerErrors).toEqual([]);
       return { session, screens, maskedScreens };
     }
 

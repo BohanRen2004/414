@@ -167,7 +167,7 @@ function renderCenter(snapshot: BrowserSessionSnapshot): string {
   }) ?? [];
   const holder = snapshot.viewModel.center.holderId;
   const history = snapshot.state.publicHistory.slice(-4).reverse().map((entry) => {
-    const action = entry.kind === 'PLAY_CARDS' ? '出牌' : entry.kind === 'PASS' ? '不出' : entry.kind;
+    const action = { PLAY_CARDS: '出牌', PASS: '不出', CHA: '岔', GOU: '勾' }[entry.kind];
     return `<li><span>${playerName(entry.playerId)}</span><b>${action}</b><i>#${entry.actionNumber}</i></li>`;
   }).join('');
   const content = currentCards.length > 0
