@@ -44,7 +44,7 @@ describe('game state invariants', () => {
     expectInvariant({ ...one, deckCount: 2 }, 'CARD_TOTAL');
     expectInvariant({ ...two, deckCount: 1 }, 'CARD_TOTAL');
     expect(() => assertGameState({ ...one, deckCount: 2 })).toThrow(/expected 108 cards/);
-    expect(() => assertGameState({ ...two, deckCount: 1 })).toThrow(/expected 54 cards/);
+    expect(() => assertGameState({ ...two, deckCount: 1 })).toThrow(/belongs to deck 2 of a 1-deck game/);
     // A started game must name a known deck version.
     expectInvariant({ ...one, deckCount: null }, 'CARD_TOTAL');
     expectInvariant({ ...two, deckCount: 3 as unknown as GameState['deckCount'] }, 'CARD_TOTAL');
@@ -54,6 +54,11 @@ describe('game state invariants', () => {
     const fixture = buildState({ deckCount: 1, phase: 'FREE_LEAD', currentPlayer: 0, hands: emptyHands });
     expect(fixture.playedCardIds).toHaveLength(54);
     expectInvariant({ ...fixture, playedCardIds: fixture.playedCardIds.slice(1) }, 'CARD_TOTAL');
+    // A second-deck card swapped into a one-deck game keeps the total but is still foreign.
+    const foreign = two.players.flatMap((player) => player.hand).find((card) => card.deckIndex === 1)!;
+    expectInvariant({ ...one, players: [{ ...seat0, hand: [foreign, ...seat0.hand.slice(1)] }, seat1, seat2, seat3] }, 'CARD_TOTAL');
+    // SETUP has no version until START_GAME picks one.
+    expectInvariant({ ...createSetupState(), deckCount: 1 }, 'CARD_TOTAL');
   });
 
   it('detects duplicate IDs before checking total card count', () => {

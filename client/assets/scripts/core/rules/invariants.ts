@@ -22,6 +22,7 @@ function assertCardConservation(state: GameState): void {
     const setupIsEmpty = state.players.every((player) => player.hand.length === 0)
       && state.playedCardIds.length === 0;
     if (!setupIsEmpty) fail('CARD_TOTAL', 'SETUP must not contain dealt cards');
+    if (state.deckCount !== null) fail('CARD_TOTAL', 'SETUP has no deck count until START_GAME chooses one');
     return;
   }
 
@@ -37,6 +38,9 @@ function assertCardConservation(state: GameState): void {
     if (seen.has(id)) fail('CARD_DUPLICATED', `physical card ID ${id} appears more than once`);
     seen.add(id);
   }
+  const deckCount = state.deckCount;
+  const foreign = state.players.flatMap((player) => player.hand).find((card) => card.deckIndex >= deckCount);
+  if (foreign !== undefined) fail('CARD_TOTAL', `card ${foreign.id} belongs to deck ${foreign.deckIndex + 1} of a ${deckCount}-deck game`);
   const expected = deckSize(state.deckCount);
   if (cardIds.length !== expected) {
     fail('CARD_TOTAL', `expected ${expected} cards across hands and played area, found ${cardIds.length}`);
