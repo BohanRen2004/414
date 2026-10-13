@@ -65,7 +65,7 @@ export interface GameState {
   readonly rulesVersion: typeof RULES_VERSION;
   readonly phase: GamePhase;
   readonly rootSeed: number | null;
-  readonly randomState: { readonly deal: number; readonly ai: number } | null;
+  readonly randomState: { readonly deal: number } | null;
   readonly firstPlayer: PlayerId | null;
   readonly players: readonly [PlayerState, PlayerState, PlayerState, PlayerState];
   readonly currentPlayer: PlayerId | null;

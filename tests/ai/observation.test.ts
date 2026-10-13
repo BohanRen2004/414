@@ -1,7 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import { buildObservation } from '../../client/assets/scripts/ai/ai-observation';
+import { chooseBasicAiAction } from '../../client/assets/scripts/ai/basic-ai';
+import { PlayerId } from '../../client/assets/scripts/core/cards/card';
 import { dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
+import { applyAction, createSetupState } from '../../client/assets/scripts/core/rules/reducer';
+import { GameState } from '../../client/assets/scripts/core/state/game-state';
+import { expectSuccess } from '../helpers/actions';
 import { buildState } from '../helpers/state-builder';
+
+function allAiGameAfter(seed: number, actions: number): GameState {
+  const started = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed })).state;
+  let state: GameState = {
+    ...started,
+    players: started.players.map((player) => ({ ...player, controlType: 'BASIC_AI' })) as unknown as GameState['players'],
+  };
+  for (let count = 0; count < actions; count += 1) {
+    const action = chooseBasicAiAction(buildObservation(state, state.currentPlayer!));
+    state = expectSuccess(applyAction(state, action)).state;
+  }
+  return state;
+}
+
+/** Trade the first card of two seats, keeping every public hand size unchanged. */
+function swapFirstCards(state: GameState, left: PlayerId, right: PlayerId): GameState {
+  const leftHand = state.players[left].hand;
+  const rightHand = state.players[right].hand;
+  const players = state.players.map((player) => {
+    if (player.playerId === left) return { ...player, hand: [rightHand[0]!, ...leftHand.slice(1)] };
+    if (player.playerId === right) return { ...player, hand: [leftHand[0]!, ...rightHand.slice(1)] };
+    return player;
+  }) as unknown as GameState['players'];
+  return { ...state, players };
+}
 
 describe('AI observation privacy', () => {
   it('copies only the acting player hand and public data', () => {
@@ -36,6 +66,28 @@ describe('AI observation privacy', () => {
     expect(observation.currentPlay).toBeNull();
     expect(observation.publicHistory).toEqual([]);
     expect(observation.decisionRandom).toBeGreaterThanOrEqual(0);
+  });
+
+  it('stays identical when only the deal seed or other players\' cards differ', () => {
+    const state = allAiGameAfter(414, 12);
+    const playerId = state.currentPlayer!;
+    const [left, right] = ([0, 1, 2, 3] as const).filter((seat) => seat !== playerId);
+    const otherDeal = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed: 2026 })).state;
+    const hiddenChanged: GameState = {
+      ...swapFirstCards(state, left!, right!),
+      rootSeed: otherDeal.rootSeed,
+      randomState: otherDeal.randomState,
+    };
+
+    expect(buildObservation(hiddenChanged, playerId)).toEqual(buildObservation(state, playerId));
+  });
+
+  it('varies the tie-break value as the public history grows', () => {
+    const values = [4, 5, 6, 7].map((actions) => {
+      const state = allAiGameAfter(414, actions);
+      return buildObservation(state, state.currentPlayer!).decisionRandom;
+    });
+    expect(new Set(values).size).toBe(values.length);
   });
 
   it('reports an invalid runtime seat ID clearly', () => {

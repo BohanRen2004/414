@@ -1,7 +1,6 @@
 import { Card, PlayerId, Rank, Suit } from '../../client/assets/scripts/core/cards/card';
 import { createDoubleDeck, dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
 import { CardGroup } from '../../client/assets/scripts/core/patterns/play-pattern';
-import { deriveSeed } from '../../client/assets/scripts/core/random/prng';
 import { GamePhase, GameState, GouChaChain, PlayerState, TrickState } from '../../client/assets/scripts/core/state/game-state';
 import { hasFlexibleFixtureSuit } from './cards';
 
@@ -220,10 +219,7 @@ export function buildState(fixture: StateFixture): GameState {
     rulesVersion: '1.0.0',
     phase: fixture.phase,
     rootSeed: seed,
-    randomState: setupDeal === null ? null : {
-      deal: setupDeal.dealStateAfterSetup,
-      ai: deriveSeed(seed!, 'AI'),
-    },
+    randomState: setupDeal === null ? null : { deal: setupDeal.dealStateAfterSetup },
     firstPlayer: fixture.phase === 'SETUP' ? null : 0,
     players,
     currentPlayer: fixture.currentPlayer,

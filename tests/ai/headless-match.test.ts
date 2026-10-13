@@ -4,7 +4,6 @@ import { chooseBasicAiAction } from '../../client/assets/scripts/ai/basic-ai';
 import { applyAction, createSetupState, setInvariantAssertionsEnabled } from '../../client/assets/scripts/core/rules/reducer';
 import { GameAction } from '../../client/assets/scripts/core/state/game-action';
 import { GameState } from '../../client/assets/scripts/core/state/game-state';
-import { XorShift32 } from '../../client/assets/scripts/core/random/prng';
 import { expectSuccess } from '../helpers/actions';
 import { AnimationQueue, AnimationSink, EventRenderer } from '../../client/assets/scripts/app/animation-queue';
 import { GameController } from '../../client/assets/scripts/app/game-controller';
@@ -161,7 +160,7 @@ describe('serialized controller and headless match', () => {
     }
   });
 
-  it('advances the AI random stream exactly once after one accepted AI action', async () => {
+  it('leaves the deal random state untouched after an accepted AI action', async () => {
     const dealt = startState(416);
     const actingPlayer = dealt.currentPlayer!;
     const [seat0, seat1, seat2, seat3] = dealt.players;
@@ -174,14 +173,13 @@ describe('serialized controller and headless match', () => {
         { ...seat3, controlType: seat3.playerId === actingPlayer ? 'BASIC_AI' : 'HUMAN' },
       ],
     };
-    const expectedRandom = new XorShift32(state.randomState!.ai).nextUint32();
     const action = chooseBasicAiAction(buildObservation(state, actingPlayer));
     const sink: AnimationSink = { play: async () => undefined, snapTo: () => undefined };
     const controller = new GameController(state, sink);
     const result = await controller.dispatch(action);
 
     expect(result.ok).toBe(true);
-    if (result.ok) expect(result.actionResult.state.randomState?.ai).toBe(expectedRandom);
+    if (result.ok) expect(result.actionResult.state.randomState).toEqual(state.randomState);
     if (result.ok) expect(result.state).toBe(controller.state);
     expect(controller.state.currentPlayer).not.toBe(actingPlayer);
   });
@@ -219,7 +217,7 @@ describe('serialized controller and headless match', () => {
     expect(controller.state.currentPlayer).not.toBe(actingPlayer);
   });
 
-  it('does not advance AI randomness when the reducer rejects the AI action', async () => {
+  it('keeps the random state when the reducer rejects the AI action', async () => {
     const dealt = startState(417);
     const actingPlayer = dealt.currentPlayer!;
     const [seat0, seat1, seat2, seat3] = dealt.players;
@@ -232,7 +230,7 @@ describe('serialized controller and headless match', () => {
         { ...seat3, controlType: seat3.playerId === actingPlayer ? 'BASIC_AI' : 'HUMAN' },
       ],
     };
-    const initialAiRandom = state.randomState!.ai;
+    const initialRandomState = state.randomState;
     const sink: AnimationSink = { play: async () => undefined, snapTo: () => undefined };
     class RejectingAiController extends GameController {
       protected override chooseAiAction(): GameAction {
@@ -245,7 +243,7 @@ describe('serialized controller and headless match', () => {
 
     expect(controller.rejectedActionCount).toBe(1);
     expect(controller.actionCount).toBe(0);
-    expect(controller.state.randomState?.ai).toBe(initialAiRandom);
+    expect(controller.state.randomState).toEqual(initialRandomState);
   });
 
   it('throws with seed, cap, and diagnostics instead of returning an unfinished match', async () => {

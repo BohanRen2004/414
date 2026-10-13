@@ -1,6 +1,5 @@
 import { Card, PlayerId, Rank, TeamId } from '../core/cards/card';
 import { CardGroup } from '../core/patterns/play-pattern';
-import { XorShift32 } from '../core/random/prng';
 import { GamePhase, GameResult, GameState, PublicActionRecord } from '../core/state/game-state';
 import { canAddGouCha } from '../core/rules/goucha';
 
@@ -22,12 +21,24 @@ export interface AiObservation {
   readonly publicPlayedCardIds: readonly string[];
   readonly publicHistory: readonly PublicActionRecord[];
   readonly result: GameResult | null;
+  /** Tie-break value hashed from this seat's public view only, so it cannot reveal the deal. */
   readonly decisionRandom: number;
   readonly legalContext: {
     readonly canPass: boolean;
     readonly gouChaNeed: 'CHA' | 'GOU' | null;
     readonly gouChaRank: Rank | null;
   };
+}
+
+/** FNV-1a with a murmur3 finalizer; any well-mixed hash works because the input is already public. */
+function hashPublicView(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
+  }
+  hash = Math.imul(hash ^ (hash >>> 16), 0x85ebca6b);
+  hash = Math.imul(hash ^ (hash >>> 13), 0xc2b2ae35);
+  return (hash ^ (hash >>> 16)) >>> 0;
 }
 
 /** Build a detached, information-safe view for one seat. */
@@ -45,11 +56,7 @@ export function buildObservation(state: GameState, playerId: PlayerId): AiObserv
     && player.hand.length > 0
     && player.finishPlace === null;
   const canAdd = currentPlayer && chain !== null && canAddGouCha(state, playerId);
-  let decisionRandom = 0;
-  if (state.randomState !== null) {
-    const peek = new XorShift32(state.randomState.ai);
-    decisionRandom = peek.nextUint32();
-  }
+  const decisionRandom = hashPublicView(JSON.stringify([playerId, state.actionNumber, state.publicHistory]));
 
   return {
     playerId,

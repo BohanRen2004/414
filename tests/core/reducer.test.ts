@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
 import { Rank, Suit } from '../../client/assets/scripts/core/cards/card';
 import { CardGroup } from '../../client/assets/scripts/core/patterns/play-pattern';
-import { deriveSeed } from '../../client/assets/scripts/core/random/prng';
 import { applyAction, createSetupState } from '../../client/assets/scripts/core/rules/reducer';
 import { GouChaAddition } from '../../client/assets/scripts/core/state/game-state';
 import { c } from '../helpers/cards';
@@ -50,10 +49,7 @@ describe('start game', () => {
     expect(started.state.currentPlayer).toBe(started.state.firstPlayer);
     expect(started.state.actionNumber).toBe(1);
     expect(started.state.rootSeed).toBe(414);
-    expect(started.state.randomState).toEqual({
-      deal: dealFourPlayers(414).dealStateAfterSetup,
-      ai: deriveSeed(414, 'AI'),
-    });
+    expect(started.state.randomState).toEqual({ deal: dealFourPlayers(414).dealStateAfterSetup });
     expect(started.events).toEqual([
       { kind: 'GAME_STARTED' },
       { kind: 'CARDS_DEALT' },
