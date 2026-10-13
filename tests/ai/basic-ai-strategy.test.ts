@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildObservation } from '../../client/assets/scripts/ai/ai-observation';
 import { chooseBasicAiAction } from '../../client/assets/scripts/ai/basic-ai';
 import { Card, PlayerId, Rank, Suit } from '../../client/assets/scripts/core/cards/card';
+import { DeckCount } from '../../client/assets/scripts/core/cards/deck';
 import { PlayPattern } from '../../client/assets/scripts/core/patterns/play-pattern';
 import { recognize } from '../../client/assets/scripts/core/patterns/recognize';
 import { applyAction } from '../../client/assets/scripts/core/rules/reducer';
@@ -226,8 +227,9 @@ describe('basic AI strategy: one deck, teammate holds, judged by public card cou
     expect(decision.kind).toBe('PASS');
   });
 
-  it('takes over with the play that starts a go-out plan instead of the weakest beat', () => {
-    // Nothing unseen beats the 2, and 10-J-Q then goes out as one play; the weakest beat, the 10, plans nothing.
+  it('takes over with the play that starts a go-out plan (R6) instead of the weakest beat', () => {
+    // Nothing unseen beats the 2, not even a bomb (no rank has three unseen copies, the jokers and the other
+    // 2s are played), and 10-J-Q then goes out as one play; the weakest beat, the 10, plans nothing.
     const decision = decide(oneDeckTeammateHolds(cards(TEN, JACK, QUEEN, TWO), table(NINE), {
       1: cards(SEVEN, EIGHT),
       3: cards(TEN, JACK, QUEEN, KING, ACE),
@@ -241,6 +243,156 @@ describe('basic AI strategy: one deck, teammate holds, judged by public card cou
       3: cards(TEN, JACK, QUEEN, KING, ACE),
     }));
     expect(decision.ranks).toEqual([TEN]);
+  });
+});
+
+/**
+ * Every card outside the four hands counts as played, so the cards the AI has not seen are exactly seats 1-3:
+ * seats 1 and 3 are opponents, seat 2 the teammate. Without a table play it is the AI's free lead.
+ */
+function counted(
+  deckCount: DeckCount,
+  hand: readonly Card[],
+  others: Record<1 | 2 | 3, Card[]>,
+  play?: { readonly cards: readonly Card[]; readonly holderId: 1 | 2 | 3 },
+  finishOrder: readonly PlayerId[] = [],
+): GameState {
+  return buildState({
+    deckCount,
+    phase: play === undefined ? 'FREE_LEAD' : 'RESPONDING',
+    currentPlayer: 0,
+    hands: { 0: hand, ...others },
+    ...(play === undefined ? {} : { currentPlay: group(play.cards, play.holderId, 1), holderId: play.holderId }),
+    finishOrder,
+  });
+}
+
+const BOTH_VERSIONS = [1, 2] as const;
+
+describe('basic AI strategy: teammate holds a straight, judged by public card counting', () => {
+  /**
+   * Seat 1 is down to two cards; the teammate holds 5-6-7 and the AI can top it only with 8-9-10. No go-out
+   * plan (R6) applies: the 3 and the 5 left after it could each be beaten.
+   */
+  function teammateStraight(deckCount: DeckCount, seatThree: Card[]): GameState {
+    return counted(
+      deckCount,
+      cards(EIGHT, NINE, TEN, THREE, FIVE),
+      { 1: cards(JACK, KING), 2: cards(THREE, FOUR, NINE), 3: seatThree },
+      { cards: table(FIVE, SIX, SEVEN), holderId: 2 },
+    );
+  }
+
+  it.each(BOTH_VERSIONS)('lets the straight stand when no unseen run of three tops it (%i deck)', (deckCount) => {
+    // Unseen runs are 3-4-5 and 4-5-6 at best; 9-10-J and J-Q-K each miss a rank.
+    expect(decide(teammateStraight(deckCount, cards(FIVE, SIX, NINE, JACK))).kind).toBe('PASS');
+  });
+
+  it.each(BOTH_VERSIONS)('takes over when the unseen cards could make a higher straight (%i deck)', (deckCount) => {
+    // The queen completes an unseen J-Q-K.
+    expect(decide(teammateStraight(deckCount, cards(FIVE, SIX, NINE, QUEEN))).ranks).toEqual([EIGHT, NINE, TEN]);
+  });
+});
+
+describe('basic AI strategy: R6 go-out plan (收尾抢权)', () => {
+  /**
+   * Opponents hold two cards each and the teammate three; no rank has three unseen copies and every 2 and
+   * joker is played, so nothing unseen beats a pair of aces or a 2, and no opponent can hold a bomb.
+   */
+  function quiet(): Record<1 | 2 | 3, Card[]> {
+    return { 1: cards(SEVEN, EIGHT), 2: cards(NINE, TEN, JACK), 3: cards(QUEEN, KING) };
+  }
+
+  /** Opponents hold four cards each, so nobody is close to finishing (no R3 threat), still without bombs. */
+  function calm(teammate: Card[]): Record<1 | 2 | 3, Card[]> {
+    return { 1: cards(SEVEN, EIGHT, THREE, FOUR), 2: teammate, 3: cards(QUEEN, KING, THREE, FIVE) };
+  }
+
+  describe('free lead', () => {
+    it.each(BOTH_VERSIONS)('leads A-A before its last card 6 when no unseen pair beats them (%i deck)', (deckCount) => {
+      // R4 alone would lead the 6 and keep the aces back.
+      expect(decide(counted(deckCount, cards(SIX, ACE, ACE), quiet())).ranks).toEqual([ACE, ACE]);
+    });
+
+    it.each(BOTH_VERSIONS)('still leads the 6 first when an unseen pair of 2s could (%i deck)', (deckCount) => {
+      const others = { ...quiet(), 3: cards(TWO, TWO) };
+      expect(decide(counted(deckCount, cards(SIX, ACE, ACE), others)).ranks).toEqual([SIX]);
+    });
+
+    it.each(BOTH_VERSIONS)('still leads the 6 first when an opponent could hold a bomb (%i deck)', (deckCount) => {
+      const others = { 1: cards(SEVEN, EIGHT), 2: cards(TEN, JACK, QUEEN), 3: cards(NINE, NINE, NINE) };
+      expect(decide(counted(deckCount, cards(SIX, ACE, ACE), others)).ranks).toEqual([SIX]);
+    });
+
+    it.each(BOTH_VERSIONS)('ignores a bomb that only the teammate has room for (%i deck)', (deckCount) => {
+      // Three unseen 9s, but each opponent holds two cards, so neither can hold the three-card bomb.
+      const others = { 1: cards(SEVEN, EIGHT), 2: cards(NINE, NINE, NINE, TEN), 3: cards(QUEEN, KING) };
+      expect(decide(counted(deckCount, cards(SIX, ACE, ACE), others)).ranks).toEqual([ACE, ACE]);
+    });
+
+    it('plans a lone small and big joker as the joker bomb (two decks)', () => {
+      // The other big joker is unseen, so the small joker alone could be beaten; the joker bomb cannot
+      // (no 4A4 is possible), so after A-A only the 6 could be beaten.
+      const others = { 1: cards(SEVEN, EIGHT), 2: cards(NINE, TEN, JACK), 3: cards(BIG_JOKER, QUEEN) };
+      expect(decide(counted(2, cards(SIX, ACE, ACE, SMALL_JOKER, BIG_JOKER), others)).ranks).toEqual([ACE, ACE]);
+    });
+
+    it.each(BOTH_VERSIONS)('still finishes outright (R1) before any go-out plan (%i deck)', (deckCount) => {
+      // Each single would start a go-out plan, but Q-K-A empties the hand at once.
+      const others = { 1: cards(SEVEN, EIGHT), 2: cards(NINE, TEN, JACK), 3: cards(FIVE, SIX) };
+      expect(decide(counted(deckCount, cards(QUEEN, KING, ACE), others)).ranks).toEqual([QUEEN, KING, ACE]);
+    });
+  });
+
+  describe('opponent holds', () => {
+    const opponentFive = (): { cards: Card[]; holderId: 1 } => ({ cards: table(FIVE), holderId: 1 });
+
+    it.each(BOTH_VERSIONS)('beats with the 2 nobody can beat instead of the weakest beat (%i deck)', (deckCount) => {
+      expect(decide(counted(deckCount, cards(SIX, TWO), quiet(), opponentFive())).ranks).toEqual([TWO]);
+    });
+
+    it.each(BOTH_VERSIONS)('keeps the weakest beat when two beatable plays would remain (%i deck)', (deckCount) => {
+      expect(decide(counted(deckCount, cards(SIX, SEVEN, TWO), quiet(), opponentFive())).ranks).toEqual([SIX]);
+    });
+
+    it.each(BOTH_VERSIONS)('keeps the weakest beat when an opponent could bomb the 2 (%i deck)', (deckCount) => {
+      const others = { 1: cards(SEVEN, EIGHT), 2: cards(TEN, JACK, QUEEN), 3: cards(NINE, NINE, NINE) };
+      expect(decide(counted(deckCount, cards(SIX, TWO), others, opponentFive())).ranks).toEqual([SIX]);
+    });
+
+    it.each(BOTH_VERSIONS)('does not count a CHA as a beat (%i deck)', (deckCount) => {
+      // Seat 3 could CHA the 2 with its pair, but a CHA is an action, not a play that beats.
+      const others = { ...quiet(), 3: cards(TWO, TWO) };
+      expect(decide(counted(deckCount, cards(SIX, TWO), others, opponentFive())).ranks).toEqual([TWO]);
+    });
+  });
+
+  describe('teammate holds', () => {
+    const teammateFive = (): { cards: Card[]; holderId: 2 } => ({ cards: table(FIVE), holderId: 2 });
+
+    it.each(BOTH_VERSIONS)('takes over without a threat to start a go-out plan (%i deck)', (deckCount) => {
+      // R3 alone passes: both opponents hold four cards.
+      const state = counted(deckCount, cards(SIX, TWO), calm(cards(NINE, TEN)), teammateFive());
+      expect(decide(state).ranks).toEqual([TWO]);
+    });
+
+    it.each(BOTH_VERSIONS)('does not take over a teammate down to one card or already out (%i deck)', (deckCount) => {
+      const oneCard = counted(deckCount, cards(SIX, TWO), calm(cards(NINE)), teammateFive());
+      expect(decide(oneCard).kind).toBe('PASS');
+      const out = counted(deckCount, cards(SIX, TWO), calm([]), teammateFive(), [2]);
+      expect(decide(out).kind).toBe('PASS');
+    });
+
+    it.each([
+      ['a bomb', [NINE, NINE, NINE, SIX]],
+      ['a split bomb', [TWO, TWO, TWO, SIX]],
+    ] as const)('never takes over with %s for a go-out plan', (_label, hand) => {
+      // 9-9-9 and the 2s would each start a plan, but R3's bomb rule still holds over a teammate.
+      for (const deckCount of BOTH_VERSIONS) {
+        const state = counted(deckCount, cards(...hand), calm(cards(NINE, TEN, JACK)), teammateFive());
+        expect(decide(state).kind, `${deckCount} deck`).toBe('PASS');
+      }
+    });
   });
 });
 

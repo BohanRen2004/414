@@ -82,10 +82,28 @@ describe('basic AI action selection', () => {
   });
 
   it('leads a loose card instead of spending or splitting 4A4', () => {
-    const state = buildFreeLead([...sameRank(Rank.FOUR, 2), ...sameRank(Rank.ACE, 1), ...sameRank(Rank.SEVEN, 1)]);
+    // Two loose cards (7 and 8) could each still be beaten, so no go-out plan (R6) applies and R4 leads the 7.
+    const state = buildFreeLead([
+      ...sameRank(Rank.FOUR, 2),
+      ...sameRank(Rank.ACE, 1),
+      ...sameRank(Rank.SEVEN, 1),
+      ...sameRank(Rank.EIGHT, 1),
+    ]);
     const action = chooseBasicAiAction(buildObservation(state, 0));
     expect(action.kind).toBe('PLAY_CARDS');
     if (action.kind === 'PLAY_CARDS') expect(action.cardIds).toEqual([state.players[0].hand[3]!.id]);
+    assertAccepted(state, action);
+  });
+
+  it('leads 4A4 first when nobody can beat it and a single loose card is left (R6)', () => {
+    // Every opponent is down to one card, so nothing can beat the 4A4; leading the 7 first (R4) would let
+    // seat 3 go out over it with its 9.
+    const state = buildFreeLead([...sameRank(Rank.FOUR, 2), ...sameRank(Rank.ACE, 1), ...sameRank(Rank.SEVEN, 1)]);
+    const action = chooseBasicAiAction(buildObservation(state, 0));
+    expect(action.kind).toBe('PLAY_CARDS');
+    if (action.kind === 'PLAY_CARDS') {
+      expect([...action.cardIds].sort()).toEqual(state.players[0].hand.slice(0, 3).map((card) => card.id).sort());
+    }
     assertAccepted(state, action);
   });
 
