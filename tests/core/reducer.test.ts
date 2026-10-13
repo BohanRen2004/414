@@ -20,14 +20,11 @@ function chainFixture(
   basePlay: CardGroup,
   additions: readonly GouChaAddition[],
   rank: Rank = Rank.FIVE,
-  aggregateCardIds: readonly string[] = [...basePlay.cardIds, ...additions.flatMap((addition) => addition.cardIds)],
 ) {
   return {
     rank,
     basePlay,
     additions,
-    aggregateCardIds,
-    aggregatePattern: { kind: 'N_OF_KIND_BOMB' as const, rank, count: aggregateCardIds.length },
     holderId: 1 as const,
     nextAddition: 'GOU' as const,
     queryCursor: 2 as const,
@@ -132,11 +129,11 @@ describe('state fixture card identity', () => {
       .toThrow(/reuses table card ID/);
   });
 
-  it('rejects reusing a regular 4A4 alias as a heart 4A4 in the aggregate mirror', () => {
+  it('rejects reusing a regular 4A4 alias as a heart 4A4 in the current-play mirror of a chain base', () => {
     const cardIds = ['four-a', 'four-b', 'ace'];
     const regular = group(cardIds, { kind: 'FOUR_A_FOUR', allHearts: false });
     const heart = group(cardIds, { kind: 'FOUR_A_FOUR', allHearts: true }, 1);
-    const gouCha = chainFixture(regular, [], Rank.FOUR, cardIds);
+    const gouCha = chainFixture(regular, [], Rank.FOUR);
     expect(() => buildState({
       phase: 'GOUCHA_QUERY',
       currentPlayer: 2,

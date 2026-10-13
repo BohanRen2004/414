@@ -1,7 +1,8 @@
 import { Card, PlayerId, Rank, TeamId } from '../core/cards/card';
 import { beats } from '../core/patterns/compare';
 import { recognize } from '../core/patterns/recognize';
-import { CardGroup, PatternErrorCode, PlayPattern } from '../core/patterns/play-pattern';
+import { PatternErrorCode, PlayPattern } from '../core/patterns/play-pattern';
+import { gouChaCardIds } from '../core/rules/goucha';
 import { GameState, PublicActionRecord } from '../core/state/game-state';
 import { ResultViewModel, buildResultViewModel } from './result-view-model';
 
@@ -26,6 +27,17 @@ export interface ContributionViewModel {
   readonly cardIds: readonly string[];
 }
 
+/**
+ * A CHA/GOU just happened and the chain may continue. Nobody is shown as acting: whether anyone is
+ * being asked depends on hidden hands, so the table only says who added what.
+ */
+export interface GouChaPendingViewModel {
+  /** The latest contributor, who holds the chain. */
+  readonly playerId: PlayerId;
+  readonly addition: 'CHA' | 'GOU';
+  readonly rank: Rank;
+}
+
 export interface GouChaPromptViewModel {
   readonly playerId: PlayerId;
   readonly addition: 'CHA' | 'GOU';
@@ -40,9 +52,13 @@ export type { ResultViewModel } from './result-view-model';
 export interface TableViewModel {
   readonly seats: Readonly<Record<'bottom' | 'top' | 'left' | 'right', SeatViewModel>>;
   readonly center: {
+    /** The pattern to beat. A gou-cha chain is labelled by its single: CHA/GOU are actions, not a 轰 or 炸弹. */
     readonly patternLabel: string;
     readonly holderId: PlayerId | null;
+    /** Cards on the table: the current play, or a chain's single followed by every CHA/GOU card. */
+    readonly cardIds: readonly string[];
     readonly contributions: readonly ContributionViewModel[];
+    readonly pending: GouChaPendingViewModel | null;
   };
   readonly controls: {
     readonly showPlay: boolean;
@@ -104,9 +120,15 @@ function contributionLabel(kind: PublicActionRecord['kind']): ContributionViewMo
   return null;
 }
 
-function buildContributions(state: GameState, currentPlay: CardGroup | null): ContributionViewModel[] {
-  if (currentPlay === null) return [];
-  const visibleIds = new Set(currentPlay.cardIds);
+function tableCardIds(state: GameState): readonly string[] {
+  const trick = state.trick;
+  if (trick === null) return [];
+  return trick.gouCha === null ? trick.currentPlay.cardIds : gouChaCardIds(trick.gouCha);
+}
+
+function buildContributions(state: GameState, cardIds: readonly string[]): ContributionViewModel[] {
+  if (cardIds.length === 0) return [];
+  const visibleIds = new Set(cardIds);
   return state.publicHistory.flatMap((record) => {
     const label = contributionLabel(record.kind);
     if (label === null || !record.cardIds.some((id) => visibleIds.has(id))) return [];
@@ -167,6 +189,14 @@ function buildGouChaPrompt(state: GameState, input: HumanUiState): GouChaPromptV
   };
 }
 
+function buildPending(state: GameState, input: HumanUiState): GouChaPendingViewModel | null {
+  const chain = state.trick?.gouCha;
+  const latest = chain?.additions[chain.additions.length - 1];
+  if (state.phase !== 'GOUCHA_QUERY' || chain === null || chain === undefined || latest === undefined
+    || state.currentPlayer === input.humanPlayerId) return null;
+  return { playerId: latest.playerId, addition: latest.addition, rank: chain.rank };
+}
+
 function buildResult(state: GameState): ResultViewModel | null {
   if (state.result === null) return null;
   return buildResultViewModel(state.result, state.rootSeed ?? 0);
@@ -204,13 +234,16 @@ export function buildTableViewModel(state: GameState, input: HumanUiState): Tabl
   const controlsVisible = humanTurn && inPlayPhase;
   const selection = selectedPlayStatus(state, input);
   const gouCha = buildGouChaPrompt(state, input);
+  const cardIds = tableCardIds(state);
 
   return {
     seats,
     center: {
       patternLabel: describePattern(currentPlay?.pattern ?? null, state.phase),
       holderId: state.trick?.holderId ?? null,
-      contributions: buildContributions(state, currentPlay),
+      cardIds: [...cardIds],
+      contributions: buildContributions(state, cardIds),
+      pending: buildPending(state, input),
     },
     controls: {
       showPlay: controlsVisible,

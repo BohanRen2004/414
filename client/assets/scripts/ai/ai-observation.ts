@@ -17,7 +17,10 @@ export interface AiObservation {
   readonly ownHand: readonly Card[];
   readonly publicPlayers: readonly AiPublicPlayer[];
   readonly phase: GamePhase;
+  /** The play to beat; during a gou-cha chain it stays the chain's single, the CHA/GOU cards are not a pattern. */
   readonly currentPlay: CardGroup | null;
+  /** Latest public contributor to the trick: the current play's owner, or during a chain the last CHA/GOU player. */
+  readonly holderId: PlayerId | null;
   readonly publicPlayedCardIds: readonly string[];
   readonly publicHistory: readonly PublicActionRecord[];
   readonly result: GameResult | null;
@@ -81,6 +84,7 @@ export function buildObservation(state: GameState, playerId: PlayerId): AiObserv
       finishPlace: seat.finishPlace,
     })),
     phase: state.phase,
+    holderId: state.trick?.holderId ?? null,
     currentPlay: state.trick === null ? null : {
       cardIds: [...state.trick.currentPlay.cardIds],
       pattern: { ...state.trick.currentPlay.pattern },

@@ -113,9 +113,10 @@ function opponentThreat(observation: AiObservation): boolean {
   );
 }
 
+/** During a gou-cha chain the holder is the last CHA/GOU player, not the owner of the single. */
 function holderIsTeammate(observation: AiObservation): boolean {
-  const holderId = observation.currentPlay?.playerId;
-  return holderId !== undefined
+  const holderId = observation.holderId;
+  return holderId !== null
     && holderId !== observation.playerId
     && observation.publicPlayers[holderId]?.teamId === observation.teamId;
 }

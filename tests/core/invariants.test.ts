@@ -242,7 +242,7 @@ describe('game state invariants', () => {
     })).toThrow(/fourth-place player 3 may retain cards only in ROUND_RESULT/);
   });
 
-  it('accepts a CHA query with a single aggregate and a GOU query with a bomb aggregate', () => {
+  it('accepts CHA and GOU queries whose current play stays the base single', () => {
     const basePlay = {
       cardIds: ['base-five'],
       pattern: { kind: 'SINGLE' as const, rank: Rank.FIVE },
@@ -253,8 +253,6 @@ describe('game state invariants', () => {
       rank: Rank.FIVE,
       basePlay,
       additions: [],
-      aggregateCardIds: ['base-five'],
-      aggregatePattern: { kind: 'SINGLE', rank: Rank.FIVE },
       holderId: 0,
       nextAddition: 'CHA',
       queryCursor: 1,
@@ -276,7 +274,6 @@ describe('game state invariants', () => {
     const ghostChain = {
       ...chaQuery.trick!.gouCha!,
       basePlay: { ...chaQuery.trick!.gouCha!.basePlay, cardIds: ['ghost-base'] },
-      aggregateCardIds: ['ghost-base'],
     };
     expectInvariant({
       ...chaQuery,
@@ -287,23 +284,9 @@ describe('game state invariants', () => {
       },
     }, 'PHASE_TRICK_MISMATCH');
 
-    const invalidChaState: GameState = {
-      ...chaQuery,
-      trick: {
-        ...chaQuery.trick!,
-        gouCha: {
-          ...chaQuery.trick!.gouCha!,
-          aggregatePattern: { kind: 'N_OF_KIND_BOMB', rank: Rank.FIVE, count: 3 },
-        },
-      },
-    };
-    expectInvariant(invalidChaState, 'PHASE_TRICK_MISMATCH');
-
     const afterCha: GouChaChain = {
       ...beforeCha,
       additions: [{ addition: 'CHA', playerId: 1, cardIds: ['cha-a', 'cha-b'], actionNumber: 2 }],
-      aggregateCardIds: ['base-five', 'cha-a', 'cha-b'],
-      aggregatePattern: { kind: 'N_OF_KIND_BOMB', rank: Rank.FIVE, count: 3 },
       holderId: 1,
       nextAddition: 'GOU',
       queryCursor: 2,
@@ -319,22 +302,53 @@ describe('game state invariants', () => {
       },
       gouCha: afterCha,
     });
+    expect(gouQuery.trick).toMatchObject({ currentPlay: basePlay, holderId: 1 });
     expect(() => assertGameState(gouQuery)).not.toThrow();
 
-    const validGouChain = gouQuery.trick!.gouCha!;
+    const gouTrick = gouQuery.trick!;
+    const gouChain = gouTrick.gouCha!;
+    // The CHA cards are an action, not a pattern: a current play merged into a three-card bomb is corrupt.
     expectInvariant({
       ...gouQuery,
       trick: {
-        ...gouQuery.trick!,
+        ...gouTrick,
         currentPlay: {
-          ...gouQuery.trick!.currentPlay,
-          cardIds: ['cha-a', 'cha-a', 'cha-b'],
+          cardIds: ['base-five', 'cha-a', 'cha-b'],
+          pattern: { kind: 'N_OF_KIND_BOMB', rank: Rank.FIVE, count: 3 },
+          playerId: 1,
+          actionNumber: 2,
         },
-        gouCha: {
-          ...validGouChain,
-          basePlay: { ...validGouChain.basePlay, cardIds: ['cha-a'] },
-          aggregateCardIds: ['cha-a', 'cha-a', 'cha-b'],
-        },
+      },
+    }, 'PHASE_TRICK_MISMATCH');
+    expectInvariant({
+      ...gouQuery,
+      trick: { ...gouTrick, holderId: 0, gouCha: { ...gouChain, holderId: 0 } },
+    }, 'PHASE_TRICK_MISMATCH');
+    expectInvariant({
+      ...gouQuery,
+      trick: { ...gouTrick, gouCha: { ...gouChain, nextAddition: 'CHA' } },
+    }, 'PHASE_TRICK_MISMATCH');
+    expectInvariant({
+      ...gouQuery,
+      trick: {
+        ...gouTrick,
+        gouCha: { ...gouChain, additions: [{ ...gouChain.additions[0]!, cardIds: ['cha-a', 'cha-a'] }] },
+      },
+    }, 'PHASE_TRICK_MISMATCH');
+    expectInvariant({
+      ...gouQuery,
+      trick: {
+        ...gouTrick,
+        gouCha: { ...gouChain, additions: [{ ...gouChain.additions[0]!, cardIds: ['cha-a', 'base-five'] }] },
+      },
+    }, 'PHASE_TRICK_MISMATCH');
+    // Nobody may CHA their own single.
+    expectInvariant({
+      ...gouQuery,
+      trick: {
+        ...gouTrick,
+        holderId: 0,
+        gouCha: { ...gouChain, holderId: 0, additions: [{ ...gouChain.additions[0]!, playerId: 0 }] },
       },
     }, 'PHASE_TRICK_MISMATCH');
   });

@@ -87,7 +87,7 @@ function aliasGroup(
     const suit = requiredSuit(group, rank);
     const prior = tableIds.get(id);
     if (prior) {
-      if (!allowedExistingIds.has(id)) throw new Error(`Fixture card ID ${id} is reused outside the current-play aggregate`);
+      if (!allowedExistingIds.has(id)) throw new Error(`Fixture card ID ${id} is reused outside the gou-cha chain`);
       if (prior.rank !== rank || (suit !== null && prior.suit !== suit)) {
         throw new Error(`Fixture card ID ${id} conflicts with its prior rank or suit`);
       }
@@ -193,12 +193,8 @@ export function buildState(fixture: StateFixture): GameState {
   const hasTrick = fixture.currentPlay !== undefined || fixture.gouCha !== undefined;
   let trick: TrickState | null = null;
   if (hasTrick) {
-    const currentPlay = fixture.currentPlay ?? {
-      cardIds: fixture.gouCha!.aggregateCardIds,
-      pattern: fixture.gouCha!.aggregatePattern,
-      playerId: fixture.gouCha!.holderId,
-      actionNumber: 1,
-    };
+    // During a chain the current play stays the base single; CHA/GOU cards are never merged into it.
+    const currentPlay = fixture.currentPlay ?? fixture.gouCha!.basePlay;
     trick = {
       currentPlay,
       holderId: fixture.holderId ?? fixture.gouCha?.holderId ?? currentPlay.playerId,

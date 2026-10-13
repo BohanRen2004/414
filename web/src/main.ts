@@ -1,6 +1,5 @@
 import { Card, Rank, Suit } from '../../client/assets/scripts/core/cards/card';
 import { createDoubleDeck } from '../../client/assets/scripts/core/cards/deck';
-import { GameState } from '../../client/assets/scripts/core/state/game-state';
 import { BrowserGameSession, BrowserSessionSnapshot } from './browser-session';
 import './style.css';
 
@@ -73,8 +72,14 @@ function playerName(playerId: number): string {
   return playerId === 1 ? '左对家' : '右对家';
 }
 
-function phaseMessage(state: GameState): string {
+function phaseMessage(snapshot: BrowserSessionSnapshot): string {
+  const state = snapshot.state;
   if (state.phase === 'ROUND_RESULT') return '本局结束';
+  // A CHA/GOU just happened. Nobody is highlighted: whether anyone is being asked to continue is private.
+  const pending = snapshot.viewModel.center.pending;
+  if (pending !== null) {
+    return `${playerName(pending.playerId)}${pending.addition === 'CHA' ? '岔' : '勾'} ${rankLabel(pending.rank)}，看有没有人接`;
+  }
   if (state.phase === 'GOUCHA_QUERY' && state.currentPlayer === 0) {
     const addition = state.trick?.gouCha?.nextAddition;
     return addition === 'CHA' ? '轮到你岔：选同点数的一对牌' : '轮到你勾：选同点数的一张牌';
@@ -161,11 +166,12 @@ function renderSeat(position: 'top' | 'left' | 'right' | 'bottom', snapshot: Bro
 
 function renderCenter(snapshot: BrowserSessionSnapshot): string {
   const trick = snapshot.state.trick;
-  const currentCards = trick?.currentPlay.cardIds.flatMap((id) => {
+  const center = snapshot.viewModel.center;
+  const currentCards = center.cardIds.flatMap((id) => {
     const card = allCards.get(id);
     return card === undefined ? [] : [renderCard(card, false, true)];
-  }) ?? [];
-  const holder = snapshot.viewModel.center.holderId;
+  });
+  const holder = center.holderId;
   const history = snapshot.state.publicHistory.slice(-4).reverse().map((entry) => {
     const action = { PLAY_CARDS: '出牌', PASS: '不出', CHA: '岔', GOU: '勾' }[entry.kind];
     return `<li><span>${playerName(entry.playerId)}</span><b>${action}</b><i>#${entry.actionNumber}</i></li>`;
@@ -173,16 +179,19 @@ function renderCenter(snapshot: BrowserSessionSnapshot): string {
   const content = currentCards.length > 0
     ? `<div class="table-cards">${currentCards.join('')}</div>`
     : '<div class="table-emblem"><span>4</span><i>A</i><span>4</span></div>';
-  const contributions = snapshot.viewModel.center.contributions.map((part) => `${playerName(part.playerId)}${part.label}`).join(' · ');
+  // CHA/GOU are actions on the single, so a chain reads like "单 6 · 左对家岔 · 你勾".
+  const actions = center.contributions.filter((part) => part.label !== '出牌').map((part) => `${playerName(part.playerId)}${part.label}`);
+  const headline = [center.patternLabel, ...actions].join(' · ');
+  const contributions = center.contributions.filter((part) => part.label === '出牌').map((part) => `${playerName(part.playerId)}${part.label}`).join(' · ');
   return `<section class="center-table" aria-label="牌桌中央">
     <div class="table-orbit orbit-one"></div><div class="table-orbit orbit-two"></div>
     <div class="table-topline"><span class="eyebrow">CURRENT TRICK</span><span class="trick-index">${trick === null ? '—' : `#${trick.currentPlay.actionNumber}`}</span></div>
-    <div class="pattern-label">${escapeHtml(snapshot.viewModel.center.patternLabel)}</div>
+    <div class="pattern-label">${escapeHtml(headline)}</div>
     ${content}
     <p class="holder-line">${holder === null ? '等待首手出牌' : `当前持有：${playerName(holder)}`}</p>
     ${contributions ? `<p class="contribution-line">${escapeHtml(contributions)}</p>` : ''}
     <div class="turn-banner ${snapshot.state.currentPlayer === 0 ? 'for-human' : ''}" role="status" aria-live="polite">
-      <span class="status-dot"></span>${escapeHtml(phaseMessage(snapshot.state))}
+      <span class="status-dot"></span>${escapeHtml(phaseMessage(snapshot))}
     </div>
     <ol class="action-history" aria-label="最近动作">${history || '<li class="history-empty">等待第一手</li>'}</ol>
   </section>`;
@@ -236,7 +245,7 @@ function renderHelp(): string {
       <span class="eyebrow">QUICK RULES</span><h2 id="help-title">一局 4A4，四人两队</h2>
       <p>座位 0 和 2 为蓝队，座位 1 和 3 为金队。每人 27 张牌，轮流严格压牌或选择不出。</p>
       <div class="rule-grid"><article><b>牌型</b><span>单张、对子、单/双/三顺、轰/炸弹、王炸、4A4。</span></article>
-        <article><b>勾岔</b><span>单牌可以被另一人用同点数对子“岔”；岔后才轮到另一人用同点数单牌“勾”。不能自己接自己的牌。</span></article>
+        <article><b>勾岔</b><span>单牌可以被另一人用同点数对子“岔”；岔后才轮到另一人用同点数单牌“勾”，岔、勾交替，不能自己接自己的牌。岔和勾是动作，不是牌型：有人岔过后链条一停，这一轮立刻结束（死岔/死勾），谁也不能再压，最后岔或勾的人接着出牌。</span></article>
         <article><b>结束</b><span>只剩一人有牌时结算；队友出完顺序决定抓人数。种子可复制分享并复现同一局。</span></article>
       </div>
       <button class="button button-primary" data-action="close-help">明白了</button>

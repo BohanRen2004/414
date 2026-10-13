@@ -1,5 +1,5 @@
 import { Card, PlayerId, Rank, TeamId } from '../cards/card';
-import { CardGroup, PlayPattern } from '../patterns/play-pattern';
+import { CardGroup } from '../patterns/play-pattern';
 import { RULES_VERSION } from '../index';
 
 export type GamePhase =
@@ -28,12 +28,16 @@ export interface GouChaAddition {
   readonly actionNumber: number;
 }
 
+/**
+ * CHA and GOU are actions on a single, not a pattern: the additions are never merged into a bomb and
+ * nothing is compared against them. While the chain runs, the trick's current play stays `basePlay`.
+ */
 export interface GouChaChain {
   readonly rank: Rank;
+  /** The single that started the chain; it is also the trick's current play. */
   readonly basePlay: CardGroup;
   readonly additions: readonly GouChaAddition[];
-  readonly aggregateCardIds: readonly string[];
-  readonly aggregatePattern: Extract<PlayPattern, { kind: 'SINGLE' | 'N_OF_KIND_BOMB' }>;
+  /** The latest contributor: the base player until a CHA, then whoever added last. */
   readonly holderId: PlayerId;
   readonly nextAddition: 'CHA' | 'GOU';
   readonly queryCursor: PlayerId;
@@ -41,7 +45,9 @@ export interface GouChaChain {
 }
 
 export interface TrickState {
+  /** The play responders must beat; during a gou-cha chain it is the chain's base single. */
   readonly currentPlay: CardGroup;
+  /** Latest successful play or, during a gou-cha chain, the latest CHA/GOU contributor. */
   readonly holderId: PlayerId;
   readonly nextResponder: PlayerId | null;
   readonly passedPlayerIds: readonly PlayerId[];

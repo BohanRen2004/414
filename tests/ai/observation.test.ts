@@ -187,6 +187,38 @@ describe('AI observation privacy', () => {
     });
   });
 
+  it('gives seat 3 the same GOU prompt, naming the CHA player as holder, whether or not a hidden seat declined the GOU first', () => {
+    const world = (partnerHasFive: boolean): GameState => {
+      let state = buildState({
+        phase: 'FREE_LEAD',
+        currentPlayer: 0,
+        hands: {
+          0: [c('lead-five', Rank.FIVE), c('lead-king', Rank.KING)],
+          // The loose five sits with seat 2 (asked to GOU first) or with the CHA player (never asked).
+          1: [c('cha-a', Rank.FIVE), c('cha-b', Rank.FIVE), partnerHasFive ? c('1-nine', Rank.NINE) : c('x-five', Rank.FIVE)],
+          2: [partnerHasFive ? c('x-five', Rank.FIVE) : c('1-nine', Rank.NINE), c('2-ten', Rank.TEN)],
+          3: [c('v-five', Rank.FIVE), c('v-queen', Rank.QUEEN)],
+        },
+      });
+      state = dispatch(state, { kind: 'PLAY_CARDS', playerId: 0, cardIds: ['lead-five'] });
+      state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['cha-a', 'cha-b'] });
+      if (partnerHasFive) {
+        expect(state.currentPlayer).toBe(2);
+        state = dispatch(state, { kind: 'DECLINE_GOUCHA', playerId: 2 });
+      }
+      expect(state).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 3 });
+      return state;
+    };
+    const declinedFirst = buildObservation(world(true), 3);
+    expect(declinedFirst).toMatchObject({
+      phase: 'GOUCHA_QUERY',
+      holderId: 1,
+      currentPlay: { cardIds: ['lead-five'], playerId: 0, pattern: { kind: 'SINGLE', rank: Rank.FIVE } },
+      legalContext: { gouChaNeed: 'GOU', gouChaRank: Rank.FIVE },
+    });
+    expect(buildObservation(world(false), 3)).toEqual(declinedFirst);
+  });
+
   it('reports an invalid runtime seat ID clearly', () => {
     const hands = dealFourPlayers(414).hands;
     const state = buildState({

@@ -64,7 +64,6 @@ function gouChaQuery(
   const additions: GouChaChain['additions'] = chaBy === null
     ? []
     : [{ addition: 'CHA', playerId: chaBy, cardIds: [`cha:${nextId++}`, `cha:${nextId++}`], actionNumber: 2 }];
-  const aggregateCardIds = [...base.cardIds, ...additions.flatMap((addition) => addition.cardIds)];
   const holderId: PlayerId = chaBy ?? baseOwner;
   return buildState({
     phase: 'GOUCHA_QUERY',
@@ -74,10 +73,6 @@ function gouChaQuery(
       rank,
       basePlay: base,
       additions,
-      aggregateCardIds,
-      aggregatePattern: chaBy === null
-        ? { kind: 'SINGLE', rank }
-        : { kind: 'N_OF_KIND_BOMB', rank, count: aggregateCardIds.length },
       holderId,
       nextAddition: chaBy === null ? 'CHA' : 'GOU',
       queryCursor: 0,
@@ -241,6 +236,16 @@ describe('basic AI strategy: gou-cha', () => {
   it('declines a CHA that would destroy its 4A4', () => {
     const decision = decide(gouChaQuery(cards(FOUR, FOUR, ACE, KING), FOUR, 1, null));
     expect(decision.kind).toBe('DECLINE_GOUCHA');
+  });
+
+  it('declines a GOU on its teammate\'s CHA even though an opponent played the single', () => {
+    const decision = decide(gouChaQuery(cards(FIVE, KING), FIVE, 1, 2));
+    expect(decision.kind).toBe('DECLINE_GOUCHA');
+  });
+
+  it('joins with a GOU on an opponent\'s CHA of its teammate\'s single', () => {
+    const decision = decide(gouChaQuery(cards(FIVE, KING), FIVE, 2, 1));
+    expect(decision.action).toMatchObject({ kind: 'ADD_GOUCHA', addition: 'GOU' });
   });
 
   it('declines gou-cha on a teammate single', () => {

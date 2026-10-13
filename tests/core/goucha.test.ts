@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Rank } from '../../client/assets/scripts/core/cards/card';
+import { Rank, Suit } from '../../client/assets/scripts/core/cards/card';
 import { applyAction } from '../../client/assets/scripts/core/rules/reducer';
 import { GameAction } from '../../client/assets/scripts/core/state/game-action';
 import { GameState, GouChaChain } from '../../client/assets/scripts/core/state/game-state';
@@ -24,14 +24,19 @@ function chainFixture(overrides: Partial<GouChaChain> = {}): GouChaChain {
     rank: Rank.FIVE,
     basePlay,
     additions: [],
-    aggregateCardIds: ['table-five'],
-    aggregatePattern: { kind: 'SINGLE', rank: Rank.FIVE },
     holderId: 0,
     nextAddition: 'CHA',
     queryCursor: 0,
     declinedPlayerIds: [],
     ...overrides,
   };
+}
+
+/** Every card the chain has put on the table, in contribution order. */
+function chainCardIds(state: GameState): string[] {
+  const chain = state.trick?.gouCha;
+  if (chain === null || chain === undefined) throw new Error('expected an active gou-cha chain');
+  return [...chain.basePlay.cardIds, ...chain.additions.flatMap((addition) => addition.cardIds)];
 }
 
 function expectRejectedWithoutMutation(state: GameState, action: GameAction, code: RuleErrorCode): void {
@@ -43,10 +48,11 @@ function expectRejectedWithoutMutation(state: GameState, action: GameAction, cod
 }
 
 describe('corrected single-card gou-cha', () => {
-  it('runs single 5 → pair 5 CHA → single 5 GOU → pair CHA → single GOU', () => {
+  it('runs single 5 → pair 5 CHA → single 5 GOU → pair CHA → single GOU, then stops at the 7-card maximum', () => {
     let state = startSingleFive({
       0: [c('lead-five', Rank.FIVE), c('0-five', Rank.FIVE), c('0-nine', Rank.NINE)],
-      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE), c('1-ten', Rank.TEN)],
+      // The eighth five stays in seat 1's hand: a CHA needs two, so nobody can ever add an eighth card.
+      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE), c('1-last-five', Rank.FIVE), c('1-ten', Rank.TEN)],
       2: [c('2-gou', Rank.FIVE), c('2-jack', Rank.JACK)],
       3: [c('3-cha-a', Rank.FIVE), c('3-cha-b', Rank.FIVE), c('3-queen', Rank.QUEEN)],
     });
@@ -54,26 +60,36 @@ describe('corrected single-card gou-cha', () => {
     expect(state.trick?.gouCha).toMatchObject({ holderId: 0, nextAddition: 'CHA' });
 
     state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
-    expect(state.trick?.gouCha).toMatchObject({ holderId: 1, nextAddition: 'GOU', aggregateCardIds: expect.any(Array) });
-    expect(state.trick?.gouCha?.aggregateCardIds).toHaveLength(3);
+    expect(state.trick?.gouCha).toMatchObject({ holderId: 1, nextAddition: 'GOU' });
+    expect(chainCardIds(state)).toHaveLength(3);
 
     state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 2, addition: 'GOU', cardIds: ['2-gou'] });
     expect(state.trick?.gouCha).toMatchObject({ holderId: 2, nextAddition: 'CHA' });
-    expect(state.trick?.gouCha?.aggregateCardIds).toHaveLength(4);
+    expect(chainCardIds(state)).toHaveLength(4);
 
     state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 3, addition: 'CHA', cardIds: ['3-cha-a', '3-cha-b'] });
     expect(state.trick?.gouCha).toMatchObject({ holderId: 3, nextAddition: 'GOU' });
-    expect(state.trick?.gouCha?.aggregateCardIds).toHaveLength(6);
+    expect(chainCardIds(state)).toHaveLength(6);
+    expect(state.currentPlayer).toBe(0);
 
-    state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 0, addition: 'GOU', cardIds: ['0-five'] });
-    expect(state.phase).toBe('RESPONDING');
-    expect(state.trick?.gouCha).toBeNull();
-    expect(state.trick?.currentPlay).toMatchObject({
-      cardIds: ['lead-five', '1-cha-a', '1-cha-b', '2-gou', '3-cha-a', '3-cha-b', '0-five'],
-      pattern: { kind: 'N_OF_KIND_BOMB', rank: Rank.FIVE, count: 7 },
-      playerId: 0,
-    });
-    expect(state.players[0].hand.map((card) => card.id)).toEqual(['0-nine']);
+    const finalGou = expectSuccess(applyAction(state, { kind: 'ADD_GOUCHA', playerId: 0, addition: 'GOU', cardIds: ['0-five'] }));
+    // Dead chain: nobody can CHA a seventh five, so the trick ends at once and the last adder leads.
+    expect(finalGou.state).toMatchObject({ phase: 'FREE_LEAD', currentPlayer: 0, trick: null });
+    expect(finalGou.events).toEqual([
+      { kind: 'GOUCHA_ADDED', playerId: 0, addition: 'GOU', cardIds: ['0-five'] },
+      { kind: 'PLAYER_REPORTED', playerId: 0, remaining: 1 },
+      { kind: 'TRICK_RESET' },
+      { kind: 'TURN_CHANGED', playerId: 0 },
+    ]);
+    expect(finalGou.state.publicHistory.map((record) => [record.playerId, record.kind, record.cardIds])).toEqual([
+      [0, 'PLAY_CARDS', ['lead-five']],
+      [1, 'CHA', ['1-cha-a', '1-cha-b']],
+      [2, 'GOU', ['2-gou']],
+      [3, 'CHA', ['3-cha-a', '3-cha-b']],
+      [0, 'GOU', ['0-five']],
+    ]);
+    expect(finalGou.state.players[0].hand.map((card) => card.id)).toEqual(['0-nine']);
+    expect(finalGou.state.players[1].hand.map((card) => card.id)).toEqual(['1-last-five', '1-ten']);
   });
 
   it('does not start from a pair or any straight/bomb pattern', () => {
@@ -191,7 +207,7 @@ describe('corrected single-card gou-cha', () => {
       { actionNumber: 2, playerId: 2, kind: 'CHA', cardIds: ['2-cha-a', '2-cha-b'] },
     ]);
     expect(added.actionNumber).toBe(3);
-    expect(added.trick?.currentPlay.actionNumber).toBe(2);
+    expect(added.trick?.gouCha?.additions.map((addition) => addition.actionNumber)).toEqual([2]);
   });
 
   it('leaves the same public state whether or not a hidden seat was asked and declined', () => {
@@ -292,13 +308,15 @@ describe('corrected single-card gou-cha', () => {
     expect(result.state.phase).toBe('ROUND_RESULT');
     expect(result.state.players[1].finishPlace).toBe(3);
     expect(result.state.players[0].finishPlace).toBe(4);
-    expect(result.state.trick?.gouCha?.aggregateCardIds).toEqual(['lead-five', '1-cha-a', '1-cha-b']);
+    expect(chainCardIds(result.state)).toEqual(['lead-five', '1-cha-a', '1-cha-b']);
+    expect(result.state.trick?.currentPlay.pattern).toEqual({ kind: 'SINGLE', rank: Rank.FIVE });
     expect(result.events).toContainEqual({ kind: 'GOUCHA_ADDED', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
     expect(result.events).toContainEqual({ kind: 'PLAYER_FINISHED', playerId: 1, place: 3 });
     expect(result.events).toContainEqual({ kind: 'ROUND_FINISHED' });
+    expect(result.events).not.toContainEqual({ kind: 'TRICK_RESET' });
   });
 
-  it('finishes a last-card CHA while keeping its cards in the chain aggregate', () => {
+  it('finishes a last-card CHA while keeping its cards in the chain', () => {
     const state = startSingleFive({
       0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
       1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE)],
@@ -307,39 +325,198 @@ describe('corrected single-card gou-cha', () => {
     });
     const result = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
     expect(result.players[1].finishPlace).toBe(1);
-    expect(result.trick?.gouCha?.aggregateCardIds).toEqual(['lead-five', '1-cha-a', '1-cha-b']);
+    expect(chainCardIds(result)).toEqual(['lead-five', '1-cha-a', '1-cha-b']);
     expect(result.trick?.holderId).toBe(1);
+    expect(result).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 2 });
   });
 
-  it('lends the next free lead to the partner of a holder who went out on a CHA', () => {
+  it('finishes a last-card GOU, then ends the dead chain and lends the lead to the GOU player\'s partner', () => {
     let state = startSingleFive({
       0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
-      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE)],
-      2: [c('2-gou', Rank.FIVE), c('2-six', Rank.SIX)],
-      3: [c('3-seven', Rank.SEVEN)],
-    });
-    state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
-    state = dispatch(state, { kind: 'DECLINE_GOUCHA', playerId: 2 });
-    for (const playerId of [2, 3, 0] as const) state = dispatch(state, { kind: 'PASS', playerId });
-    expect(state.phase).toBe('FREE_LEAD');
-    expect(state.currentPlayer).toBe(3);
-  });
-
-  it('finishes a last-card GOU while keeping its card in the chain aggregate', () => {
-    let state = startSingleFive({
-      0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
-      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE)],
+      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE), c('1-six', Rank.SIX)],
       2: [c('2-gou', Rank.FIVE)],
       3: [c('3-seven', Rank.SEVEN)],
     });
     state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
     const result = expectSuccess(applyAction(state, { kind: 'ADD_GOUCHA', playerId: 2, addition: 'GOU', cardIds: ['2-gou'] }));
-    expect(result.state.players[2].finishPlace).toBe(2);
-    expect(result.state.trick?.gouCha).toBeNull();
-    expect(result.state.trick?.currentPlay).toMatchObject({
-      cardIds: ['lead-five', '1-cha-a', '1-cha-b', '2-gou'],
-      pattern: { kind: 'N_OF_KIND_BOMB', rank: Rank.FIVE, count: 4 },
+    expect(result.state.players[2].finishPlace).toBe(1);
+    expect(result.state).toMatchObject({ phase: 'FREE_LEAD', currentPlayer: 0, trick: null });
+    expect(result.events).toEqual([
+      { kind: 'GOUCHA_ADDED', playerId: 2, addition: 'GOU', cardIds: ['2-gou'] },
+      { kind: 'PLAYER_FINISHED', playerId: 2, place: 1 },
+      { kind: 'TRICK_RESET' },
+      { kind: 'TURN_CHANGED', playerId: 0 },
+    ]);
+  });
+});
+
+describe('dead gou-cha (死岔/死勾): a chain with a CHA ends the trick when it stops', () => {
+  it('ends the trick at once when nobody can GOU a CHA, and the CHA player leads; nobody may respond', () => {
+    const hands = {
+      0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE), c('1-ten', Rank.TEN)],
+      2: [c('2-jack', Rank.JACK), c('2-king-a', Rank.KING), c('2-king-b', Rank.KING), c('2-king-c', Rank.KING)],
+      3: [c('3-four-a', Rank.FOUR), c('3-four-b', Rank.FOUR), c('3-ace', Rank.ACE), c('3-queen', Rank.QUEEN)],
+    } as const;
+    const query = startSingleFive(hands);
+    expect(query).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 1 });
+
+    const cha = expectSuccess(applyAction(query, {
+      kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'],
+    }));
+    expect(cha.state).toMatchObject({ phase: 'FREE_LEAD', currentPlayer: 1, trick: null });
+    expect(cha.events).toEqual([
+      { kind: 'GOUCHA_ADDED', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] },
+      { kind: 'PLAYER_REPORTED', playerId: 1, remaining: 1 },
+      { kind: 'TRICK_RESET' },
+      { kind: 'TURN_CHANGED', playerId: 1 },
+    ]);
+    expect(cha.state.publicHistory.map((record) => record.kind)).toEqual(['PLAY_CARDS', 'CHA']);
+
+    // Nobody gets to beat the dead CHA: not with a bomb, not with 4A4, and there is nothing to pass on.
+    expectRejectedWithoutMutation(cha.state, { kind: 'PLAY_CARDS', playerId: 3, cardIds: ['3-four-a', '3-four-b', '3-ace'] }, 'NOT_CURRENT_PLAYER');
+    expectRejectedWithoutMutation(cha.state, { kind: 'PLAY_CARDS', playerId: 2, cardIds: ['2-king-a', '2-king-b', '2-king-c'] }, 'NOT_CURRENT_PLAYER');
+    expectRejectedWithoutMutation(cha.state, { kind: 'PASS', playerId: 1 }, 'WRONG_PHASE');
+    expectRejectedWithoutMutation(cha.state, { kind: 'PASS', playerId: 2 }, 'WRONG_PHASE');
+    // The CHA player starts a fresh trick with any lead; it does not have to beat anything.
+    const lead = dispatch(cha.state, { kind: 'PLAY_CARDS', playerId: 1, cardIds: ['1-ten'] });
+    expect(lead.trick?.currentPlay).toMatchObject({ cardIds: ['1-ten'], playerId: 1, pattern: { kind: 'SINGLE', rank: Rank.TEN } });
+  });
+
+  it('ends the trick when every eligible seat declines the GOU, with the decline left private', () => {
+    let state = startSingleFive({
+      0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE), c('1-ten', Rank.TEN)],
+      2: [c('2-five', Rank.FIVE), c('2-jack', Rank.JACK)],
+      3: [c('3-queen', Rank.QUEEN)],
     });
-    expect(result.events).toContainEqual({ kind: 'PLAYER_FINISHED', playerId: 2, place: 2 });
+    state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
+    expect(state).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 2 });
+    const declined = expectSuccess(applyAction(state, { kind: 'DECLINE_GOUCHA', playerId: 2 }));
+    expect(declined.state).toMatchObject({ phase: 'FREE_LEAD', currentPlayer: 1, trick: null });
+    expect(declined.events).toEqual([
+      { kind: 'GOUCHA_DECLINED', playerId: 2 },
+      { kind: 'TRICK_RESET' },
+      { kind: 'TURN_CHANGED', playerId: 1 },
+    ]);
+    expect(declined.state.publicHistory).toEqual(state.publicHistory);
+    expect(declined.state.actionNumber).toBe(state.actionNumber);
+  });
+
+  it('gives the lead to the GOU player when nobody can CHA after a GOU', () => {
+    let state = startSingleFive({
+      0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE), c('1-ten', Rank.TEN)],
+      2: [c('2-gou', Rank.FIVE), c('2-jack', Rank.JACK)],
+      3: [c('3-queen', Rank.QUEEN)],
+    });
+    state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
+    expect(state).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 2 });
+    const gou = expectSuccess(applyAction(state, { kind: 'ADD_GOUCHA', playerId: 2, addition: 'GOU', cardIds: ['2-gou'] }));
+    expect(gou.state).toMatchObject({ phase: 'FREE_LEAD', currentPlayer: 2, trick: null });
+    expect(gou.events.slice(-2)).toEqual([{ kind: 'TRICK_RESET' }, { kind: 'TURN_CHANGED', playerId: 2 }]);
+  });
+
+  it('lets the original single player GOU after someone else\'s CHA and then lead', () => {
+    let state = startSingleFive({
+      0: [c('lead-five', Rank.FIVE), c('0-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE), c('1-ten', Rank.TEN)],
+      2: [c('2-jack', Rank.JACK)],
+      3: [c('3-queen', Rank.QUEEN)],
+    });
+    state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
+    expect(state).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 0 });
+    expect(state.trick?.gouCha).toMatchObject({ holderId: 1, nextAddition: 'GOU' });
+    state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 0, addition: 'GOU', cardIds: ['0-five'] });
+    expect(state).toMatchObject({ phase: 'FREE_LEAD', currentPlayer: 0, trick: null });
+  });
+
+  it('lends the lead to the partner when the final adder went out on the addition (借光)', () => {
+    const state = startSingleFive({
+      0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE)],
+      2: [c('2-six', Rank.SIX)],
+      3: [c('3-seven', Rank.SEVEN), c('3-eight', Rank.EIGHT)],
+    });
+    const cha = expectSuccess(applyAction(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] }));
+    expect(cha.state.players[1].finishPlace).toBe(1);
+    expect(cha.state).toMatchObject({ phase: 'FREE_LEAD', currentPlayer: 3, trick: null });
+    expect(cha.events).toEqual([
+      { kind: 'GOUCHA_ADDED', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] },
+      { kind: 'PLAYER_FINISHED', playerId: 1, place: 1 },
+      { kind: 'TRICK_RESET' },
+      { kind: 'TURN_CHANGED', playerId: 3 },
+    ]);
+  });
+
+  it('passes the lead clockwise when the final adder and their partner are both out', () => {
+    const state = startSingleFive({
+      0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE)],
+      2: [c('2-six', Rank.SIX), c('2-seven', Rank.SEVEN)],
+      3: [],
+    }, [3]);
+    const cha = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
+    expect(cha.players[1].finishPlace).toBe(2);
+    expect(cha).toMatchObject({ phase: 'FREE_LEAD', currentPlayer: 2, trick: null });
+  });
+
+  it('keeps the base single as the current play during the chain: CHA/GOU cards are never merged into a bomb', () => {
+    let state = startSingleFive({
+      0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE), c('1-ten', Rank.TEN)],
+      2: [c('2-gou', Rank.FIVE), c('2-jack', Rank.JACK)],
+      3: [c('3-cha-a', Rank.FIVE), c('3-cha-b', Rank.FIVE), c('3-queen', Rank.QUEEN)],
+    });
+    const base = state.trick!.currentPlay;
+    state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
+    expect(state.trick?.currentPlay).toEqual(base);
+    expect(state.trick?.holderId).toBe(1);
+    state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 2, addition: 'GOU', cardIds: ['2-gou'] });
+    expect(state.trick?.currentPlay).toEqual(base);
+    expect(state.trick?.currentPlay.pattern).toEqual({ kind: 'SINGLE', rank: Rank.FIVE });
+    expect(state.trick?.gouCha).toMatchObject({ holderId: 2, nextAddition: 'CHA' });
+    expect(state.trick?.gouCha).not.toHaveProperty('aggregatePattern');
+    expect(state.trick?.gouCha).not.toHaveProperty('aggregateCardIds');
+    expect(chainCardIds(state)).toEqual(['lead-five', '1-cha-a', '1-cha-b', '2-gou']);
+  });
+
+  it('accepts no response, bomb, or 4A4 while a chain is being asked', () => {
+    let state = startSingleFive({
+      0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE), c('1-small', Rank.SMALL_JOKER, Suit.JOKER), c('1-big', Rank.BIG_JOKER, Suit.JOKER)],
+      2: [c('2-gou', Rank.FIVE), c('2-four-a', Rank.FOUR), c('2-four-b', Rank.FOUR), c('2-ace', Rank.ACE)],
+      3: [c('3-king-a', Rank.KING), c('3-king-b', Rank.KING), c('3-king-c', Rank.KING), c('3-king-d', Rank.KING)],
+    });
+    expect(state).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 1 });
+    expectRejectedWithoutMutation(state, { kind: 'PLAY_CARDS', playerId: 1, cardIds: ['1-small', '1-big'] }, 'WRONG_PHASE');
+    expectRejectedWithoutMutation(state, { kind: 'PASS', playerId: 1 }, 'WRONG_PHASE');
+
+    state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
+    expect(state).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 2 });
+    expectRejectedWithoutMutation(state, { kind: 'PLAY_CARDS', playerId: 2, cardIds: ['2-four-a', '2-four-b', '2-ace'] }, 'WRONG_PHASE');
+    expectRejectedWithoutMutation(state, { kind: 'PLAY_CARDS', playerId: 3, cardIds: ['3-king-a', '3-king-b', '3-king-c', '3-king-d'] }, 'WRONG_PHASE');
+    expectRejectedWithoutMutation(state, { kind: 'PASS', playerId: 2 }, 'WRONG_PHASE');
+
+    state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 2, addition: 'GOU', cardIds: ['2-gou'] });
+    expect(state).toMatchObject({ phase: 'FREE_LEAD', currentPlayer: 2, trick: null });
+    expectRejectedWithoutMutation(state, { kind: 'PLAY_CARDS', playerId: 3, cardIds: ['3-king-a', '3-king-b', '3-king-c', '3-king-d'] }, 'NOT_CURRENT_PLAYER');
+    expectRejectedWithoutMutation(state, { kind: 'PLAY_CARDS', playerId: 1, cardIds: ['1-small', '1-big'] }, 'NOT_CURRENT_PLAYER');
+  });
+
+  it('keeps ordinary responding on a single that nobody CHAs: higher singles and bombs still beat it', () => {
+    let state = startSingleFive({
+      0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+      1: [c('1-five-a', Rank.FIVE), c('1-five-b', Rank.FIVE), c('1-six', Rank.SIX)],
+      2: [c('2-four-a', Rank.FOUR), c('2-four-b', Rank.FOUR), c('2-ace', Rank.ACE), c('2-jack', Rank.JACK)],
+      3: [c('3-queen', Rank.QUEEN)],
+    });
+    expect(state).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 1 });
+    state = dispatch(state, { kind: 'DECLINE_GOUCHA', playerId: 1 });
+    expect(state).toMatchObject({ phase: 'RESPONDING', currentPlayer: 1, trick: { holderId: 0, gouCha: null } });
+    state = dispatch(state, { kind: 'PLAY_CARDS', playerId: 1, cardIds: ['1-six'] });
+    expect(state).toMatchObject({ phase: 'RESPONDING', currentPlayer: 2, trick: { holderId: 1 } });
+    state = dispatch(state, { kind: 'PLAY_CARDS', playerId: 2, cardIds: ['2-four-a', '2-four-b', '2-ace'] });
+    expect(state.trick?.currentPlay.pattern).toEqual({ kind: 'FOUR_A_FOUR', allHearts: false });
   });
 });

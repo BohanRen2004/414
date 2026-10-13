@@ -9,7 +9,7 @@ import { createSetupState } from '../../client/assets/scripts/core/rules/reducer
 import { buildDeclineAction, buildGouChaAction } from '../../client/assets/scripts/ui/goucha-actions';
 import { clearSelection, nextHint, toggleCard } from '../../client/assets/scripts/ui/hand-selection';
 import { HumanUiState, TableViewModel, buildTableViewModel } from '../../client/assets/scripts/ui/table-view-model';
-import { hidesGouChaQuery, visibleEventsFor, visibleStateFor } from '../../client/assets/scripts/ui/visible-state';
+import { gouChaPendingFrame, hidesGouChaQuery, visibleEventsFor, visibleStateFor } from '../../client/assets/scripts/ui/visible-state';
 
 export interface BrowserGameOptions {
   readonly animationDelayMs?: number;
@@ -18,7 +18,10 @@ export interface BrowserGameOptions {
 }
 
 export interface BrowserSessionSnapshot {
-  /** What the human may see: another seat's gou-cha query is shown as the ordinary response it closes into. */
+  /**
+   * What the human may see: another seat's query on a single is shown as the ordinary response it closes
+   * into, and after a CHA/GOU the chain is shown pending with nobody to act (see visible-state.ts).
+   */
   readonly state: GameState;
   readonly viewModel: TableViewModel;
   readonly selectedCardIds: readonly string[];
@@ -28,6 +31,11 @@ export interface BrowserSessionSnapshot {
 }
 
 export type BrowserSessionListener = (snapshot: BrowserSessionSnapshot) => void;
+
+/** Events that belong to the outcome after a pending CHA/GOU frame rather than to the frame itself. */
+function isOutcomeEvent(event: GameEvent): boolean {
+  return event.kind === 'TURN_CHANGED' || event.kind === 'TRICK_RESET';
+}
 
 function wait(durationMs: number): Promise<void> {
   return durationMs <= 0 ? Promise.resolve() : new Promise((resolve) => setTimeout(resolve, durationMs));
@@ -41,10 +49,12 @@ export class BrowserGameSession {
   private ui: HumanUiState = { humanPlayerId: 0, selectedCardIds: [], hintIndex: 0 };
   private busy = false;
   private errorCode: string | null = null;
-  /** A shown action that opened another seat's hidden gou-cha query, held back until the query ends. */
+  /** A shown action that opened another seat's hidden CHA query on a single, held back until the query ends. */
   private deferred: { readonly events: readonly GameEvent[]; readonly state: GameState } | null = null;
   /** State behind the screen last published; it trails the rules state while AI turns are presented. */
   private shown: GameState;
+  /** Rules state after the last presented transition, i.e. the state the next transition starts from. */
+  private committed: GameState;
 
   public constructor(public readonly seed: number, options: BrowserGameOptions = {}) {
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffff_ffff) {
@@ -57,10 +67,14 @@ export class BrowserGameSession {
 
     const sink: AnimationSink = {
       play: (events, state) => this.present(events, state),
-      snapTo: (state) => this.publish([], state),
+      snapTo: (state) => {
+        this.committed = state;
+        this.publish([], state);
+      },
     };
     this.controller = new GameController(options.initialState ?? createSetupState(), sink);
     this.shown = this.controller.state;
+    this.committed = this.controller.state;
   }
 
   /** Authoritative rules state; render `snapshot().state` instead, which hides other seats' gou-cha queries. */
@@ -176,24 +190,42 @@ export class BrowserGameSession {
 
   /**
    * Show one committed transition the way the human would see it if hidden queries did not exist.
-   * Another seat's decline is never shown and takes no animation time. An action that opens another
-   * seat's query is held back until the query ends, then shown with its outcome (the human's own
-   * prompt or the ordinary response), or, if a CHA/GOU ends it, shown just before that addition.
+   * Another seat's decline is never shown and takes no animation time.
+   *
+   * An action that opens another seat's query on a single nobody has CHA'd is held back until the query
+   * ends, then shown with its outcome (the human's own prompt or the ordinary response), or, if a CHA ends
+   * it, shown just before that CHA.
+   *
+   * Every CHA/GOU, and the human's own decline once a CHA has happened, is followed by one neutral pending
+   * frame (the chain on the table, nobody to act) and then by the next public outcome: the human's prompt,
+   * the next CHA/GOU, or the trick reset of a dead chain. The pending frame is shown even when the rules
+   * core already closed the chain because nobody could continue, so the screens never reveal whether
+   * anybody was asked.
    */
   private async present(events: readonly GameEvent[], state: GameState): Promise<void> {
+    const before = this.committed;
+    this.committed = state;
     const humanId = this.ui.humanPlayerId;
-    const deferred = this.deferred;
+    const hidden = hidesGouChaQuery(state, humanId);
     if (events.some((event) => event.kind === 'GOUCHA_DECLINED' && event.playerId !== humanId)) {
-      if (deferred === null || hidesGouChaQuery(state, humanId)) return;
+      if (hidden) return;
+      const deferred = this.deferred;
       this.deferred = null;
-      await this.show(deferred.events, state);
+      await this.show(deferred?.events ?? events, state);
       return;
     }
-    if (deferred !== null) {
+    if (this.deferred !== null) {
+      const deferred = this.deferred;
       this.deferred = null;
       await this.show(deferred.events, deferred.state);
     }
-    if (hidesGouChaQuery(state, humanId)) {
+    const pending = gouChaPendingFrame(before, state);
+    if (pending !== null) {
+      await this.show(events.filter((event) => !isOutcomeEvent(event)), pending);
+      if (!hidden) await this.show(events.filter(isOutcomeEvent), state);
+      return;
+    }
+    if (hidden) {
       this.deferred = { events, state };
       return;
     }
