@@ -324,6 +324,18 @@ describe('basic AI strategy: R6 go-out plan (收尾抢权)', () => {
       expect(decide(counted(deckCount, cards(SIX, ACE, ACE), others)).ranks).toEqual([SIX]);
     });
 
+    it.each(BOTH_VERSIONS)('still leads the 6 first when an opponent could hold the joker bomb (%i deck)', (deckCount) => {
+      // No unseen pair beats the aces; only the unseen small and big joker together could.
+      const others = { ...quiet(), 3: cards(SMALL_JOKER, BIG_JOKER) };
+      expect(decide(counted(deckCount, cards(SIX, ACE, ACE), others)).ranks).toEqual([SIX]);
+    });
+
+    it.each(BOTH_VERSIONS)('still leads the 6 first when an opponent could hold a 4A4 (%i deck)', (deckCount) => {
+      // One unseen ace cannot make a higher pair; with two unseen 4s it completes a 4A4.
+      const others = { ...quiet(), 3: cards(FOUR, FOUR, ACE) };
+      expect(decide(counted(deckCount, cards(SIX, ACE, ACE), others)).ranks).toEqual([SIX]);
+    });
+
     it.each(BOTH_VERSIONS)('ignores a bomb that only the teammate has room for (%i deck)', (deckCount) => {
       // Three unseen 9s, but each opponent holds two cards, so neither can hold the three-card bomb.
       const others = { 1: cards(SEVEN, EIGHT), 2: cards(NINE, NINE, NINE, TEN), 3: cards(QUEEN, KING) };
