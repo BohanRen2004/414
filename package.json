@@ -9,7 +9,9 @@
     "test:watch": "vitest",
     "typecheck:rules": "tsc -p tsconfig.rules.json --noEmit",
     "typecheck:web": "tsc -p tsconfig.web.json --noEmit",
-    "verify": "npm run typecheck:rules && npm run typecheck:web && npm test"
+    "verify": "npm run typecheck:rules && npm run typecheck:web && npm run typecheck:minigame && npm test",
+    "build:minigame": "vite build --config vite.minigame.config.ts",
+    "typecheck:minigame": "tsc -p tsconfig.minigame.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

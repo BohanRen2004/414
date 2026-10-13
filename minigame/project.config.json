@@ -1,0 +1,17 @@
+{
+  "description": "4A4 微信小游戏",
+  "compileType": "game",
+  "projectname": "4a4",
+  "appid": "touristappid",
+  "libVersion": "3.0.0",
+  "setting": {
+    "es6": true,
+    "enhance": true,
+    "minified": true,
+    "urlCheck": true
+  },
+  "packOptions": {
+    "ignore": [{ "type": "folder", "value": "src" }],
+    "include": []
+  }
+}

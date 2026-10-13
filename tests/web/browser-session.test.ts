@@ -64,6 +64,14 @@ describe('browser game session', () => {
     expect(busySelections.every((selected) => selected.length === 0)).toBe(true);
   });
 
+  it('offers the play the AI would choose as the first hint', async () => {
+    const session = new BrowserGameSession(seedWithHumanLead(), { animationDelayMs: 0 });
+    await session.start();
+    session.cycleHint();
+    const expected = chooseBasicAiAction({ ...buildObservation(session.state, 0), decisionRandom: 0 });
+    expect('cardIds' in expected && [...session.selectedCardIds].sort()).toEqual('cardIds' in expected && [...expected.cardIds].sort());
+  });
+
   it('rejects Pass during a free lead without mutating the authoritative state', async () => {
     const session = new BrowserGameSession(seedWithHumanLead(), { animationDelayMs: 0 });
     await session.start();

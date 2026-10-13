@@ -11,3 +11,4 @@ client/build/
 client/profiles/
 coverage/
 *.log
+minigame/game.js

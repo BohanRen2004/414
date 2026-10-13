@@ -1,5 +1,6 @@
 import { generateCandidates } from '../../client/assets/scripts/ai/candidates';
 import { buildObservation } from '../../client/assets/scripts/ai/ai-observation';
+import { compareCandidateScores, scoreCandidate } from '../../client/assets/scripts/ai/score';
 import { AnimationSink } from '../../client/assets/scripts/app/animation-queue';
 import { GameController } from '../../client/assets/scripts/app/game-controller';
 import { DEFAULT_DECK_COUNT, DeckCount, isDeckCount } from '../../client/assets/scripts/core/cards/deck';
@@ -145,7 +146,12 @@ export class BrowserGameSession {
   public cycleHint(): void {
     if (this.busy) return;
     const observation = buildObservation(this.state, 0);
-    this.ui = nextHint(this.ui, generateCandidates(observation));
+    // Hints start with the play the AI would choose, then go down its ranking.
+    const ranked = generateCandidates(observation)
+      .map((action) => ({ action, score: scoreCandidate(observation, action) }))
+      .sort((left, right) => compareCandidateScores(left.score, right.score) || left.score.stableKey.localeCompare(right.score.stableKey))
+      .map(({ action }) => action);
+    this.ui = nextHint(this.ui, ranked);
     this.errorCode = null;
     this.publish();
   }

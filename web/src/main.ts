@@ -1,6 +1,9 @@
-import { Card, Rank, Suit } from '../../client/assets/scripts/core/cards/card';
+import { Card } from '../../client/assets/scripts/core/cards/card';
 import { createDoubleDeck, DEFAULT_DECK_COUNT, DeckCount } from '../../client/assets/scripts/core/cards/deck';
 import { DECK_OPTIONS, deckOption } from '../../client/assets/scripts/ui/deck-options';
+import {
+  SUIT_GLYPH as suitGlyph, HISTORY_ACTION_LABEL, errorMessage, formatSeed, isRedCard, phaseMessage as tablePhaseMessage, sortCardsForDisplay, playerName, rankLabel,
+} from '../../client/assets/scripts/ui/labels';
 import { BrowserGameSession, BrowserSessionSnapshot } from './browser-session';
 import './style.css';
 
@@ -9,13 +12,6 @@ if (root === null) throw new Error('Missing #app root');
 
 // One deck uses the same card IDs as the first of two decks, so this map serves both versions.
 const allCards = new Map(createDoubleDeck().map((card) => [card.id, card]));
-const suitGlyph: Record<Suit, string> = {
-  [Suit.CLUB]: '♣',
-  [Suit.DIAMOND]: '♦',
-  [Suit.HEART]: '♥',
-  [Suit.SPADE]: '♠',
-  [Suit.JOKER]: '✦',
-};
 
 let helpOpen = false;
 let notice = '';
@@ -52,81 +48,22 @@ function shownDeckCount(snapshot: BrowserSessionSnapshot): DeckCount {
   return snapshot.state.deckCount ?? chosenDeckCount;
 }
 
-function formatSeed(seed: number): string {
-  return `#${seed.toString().padStart(10, '0')}`;
-}
 
-function rankLabel(rank: Rank): string {
-  switch (rank) {
-    case Rank.THREE: return '3';
-    case Rank.FOUR: return '4';
-    case Rank.FIVE: return '5';
-    case Rank.SIX: return '6';
-    case Rank.SEVEN: return '7';
-    case Rank.EIGHT: return '8';
-    case Rank.NINE: return '9';
-    case Rank.TEN: return '10';
-    case Rank.JACK: return 'J';
-    case Rank.QUEEN: return 'Q';
-    case Rank.KING: return 'K';
-    case Rank.ACE: return 'A';
-    case Rank.TWO: return '2';
-    case Rank.SMALL_JOKER: return '小王';
-    case Rank.BIG_JOKER: return '大王';
-  }
-}
 
-function sortHand(cards: readonly Card[]): Card[] {
-  return [...cards].sort((left, right) => left.rank - right.rank || left.suit - right.suit || left.deckIndex - right.deckIndex);
-}
 
-function playerName(playerId: number): string {
-  if (playerId === 0) return '你';
-  if (playerId === 2) return '搭档';
-  return playerId === 1 ? '左对家' : '右对家';
-}
+
+
 
 function phaseMessage(snapshot: BrowserSessionSnapshot): string {
-  const state = snapshot.state;
-  if (state.phase === 'ROUND_RESULT') return '本局结束';
-  // A CHA/GOU just happened. Nobody is highlighted: whether anyone is being asked to continue is private.
-  const pending = snapshot.viewModel.center.pending;
-  if (pending !== null) {
-    return `${playerName(pending.playerId)}${pending.addition === 'CHA' ? '岔' : '勾'} ${rankLabel(pending.rank)}，看有没有人接`;
-  }
-  if (state.phase === 'GOUCHA_QUERY' && state.currentPlayer === 0) {
-    const addition = state.trick?.gouCha?.nextAddition;
-    return addition === 'CHA' ? '轮到你岔：选同点数的一对牌' : '轮到你勾：选同点数的一张牌';
-  }
-  // While earlier moves are still being shown, the human's turn is not open yet (it may still be pre-empted by a 岔).
-  if (state.currentPlayer === 0 && snapshot.isBusy && (state.phase === 'FREE_LEAD' || state.phase === 'RESPONDING')) return '等待其他玩家…';
-  if (state.currentPlayer === 0 && state.phase === 'FREE_LEAD') return '轮到你自由出牌';
-  if (state.currentPlayer === 0 && state.phase === 'RESPONDING') return '轮到你压牌，或选择不出';
-  return state.currentPlayer === null ? '正在准备牌局' : `${playerName(state.currentPlayer)}思考中`;
+  return tablePhaseMessage(snapshot.state, snapshot.viewModel, snapshot.isBusy);
 }
 
 function humanError(snapshot: BrowserSessionSnapshot): string {
-  const code = snapshot.viewModel.controls.errorKey ?? snapshot.errorCode;
-  if (code === null) return '';
-  const messages: Record<string, string> = {
-    'selection.empty': '先选择要出的牌。',
-    'pattern.mixed_ranks': '对子需要两张同点数牌。',
-    'pattern.sequence_too_short': '顺子至少需要连续三张。',
-    'pattern.sequence_gap': '顺子点数必须连续。',
-    'pattern.sequence_forbidden_rank': '2 和大小王不能加入顺子。',
-    'pattern.sequence_multiplicity': '顺子每个点数的张数必须一致。',
-    'pattern.unsupported_combination': '这组牌不符合已确认的牌型。',
-    'rule.not_current_player': '现在还没有轮到你。',
-    'rule.wrong_phase': '当前阶段不能执行这个动作。',
-    'rule.does_not_beat_current_play': '这组牌压不过桌面牌。',
-    'rule.card_not_owned': '选择的牌已不在你的手牌中。',
-    'INVALID_GOUCHA_SELECTION': '请选择符合岔/勾要求的牌。',
-  };
-  return messages[code] ?? `操作未生效（${code}）`;
+  return errorMessage(snapshot.viewModel.controls.errorKey ?? snapshot.errorCode);
 }
 
 function renderCard(card: Card, selected: boolean, compact = false, showCopy = true): string {
-  const red = card.suit === Suit.HEART || card.suit === Suit.DIAMOND || card.rank === Rank.BIG_JOKER;
+  const red = isRedCard(card);
   const rank = rankLabel(card.rank);
   const glyph = suitGlyph[card.suit];
   const classes = ['playing-card', red ? 'is-red' : '', selected ? 'is-selected' : '', compact ? 'is-compact' : '']
@@ -148,7 +85,7 @@ function renderHand(snapshot: BrowserSessionSnapshot): string {
   const selected = new Set(snapshot.selectedCardIds);
   const prompt = snapshot.viewModel.gouCha;
   const eligible = prompt === null ? null : new Set(prompt.eligibleCardIds);
-  return `<div class="hand-track" aria-label="你的手牌">${sortHand(hand).map((card) => {
+  return `<div class="hand-track" aria-label="你的手牌">${sortCardsForDisplay(hand).map((card) => {
     const active = selected.has(card.id);
     const ineligible = eligible !== null && !eligible.has(card.id);
     const cardHtml = renderCard(card, active, false, showCopy);
@@ -193,7 +130,7 @@ function renderCenter(snapshot: BrowserSessionSnapshot): string {
   });
   const holder = center.holderId;
   const history = snapshot.state.publicHistory.slice(-4).reverse().map((entry) => {
-    const action = { PLAY_CARDS: '出牌', PASS: '不出', CHA: '岔', GOU: '勾' }[entry.kind];
+    const action = HISTORY_ACTION_LABEL[entry.kind];
     return `<li><span>${playerName(entry.playerId)}</span><b>${action}</b><i>#${entry.actionNumber}</i></li>`;
   }).join('');
   const content = currentCards.length > 0

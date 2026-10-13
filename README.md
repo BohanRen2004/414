@@ -27,6 +27,10 @@ npm run preview:web
 - `?seed=414&decks=1` 可固定种子与牌数（`decks` 省略为两副牌）；相同种子和牌数可重放相同发牌与 AI 决策。
 - AI 只接收自己的手牌及公开信息；其他玩家的手牌不会传给浏览器表现层。
 
+## 微信小游戏
+
+`minigame/` 是微信小游戏版本（Canvas 绘制，规则和 AI 与网页版共用）。运行 `npm run build:minigame` 生成 `minigame/game.js`，再用微信开发者工具导入 `minigame` 目录，详见 [minigame/README.md](minigame/README.md)。
+
 ## 架构
 
 ```text
