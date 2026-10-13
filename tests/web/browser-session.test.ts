@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { buildObservation } from '../../client/assets/scripts/ai/ai-observation';
 import { chooseBasicAiAction } from '../../client/assets/scripts/ai/basic-ai';
 import { Card, Rank, Suit } from '../../client/assets/scripts/core/cards/card';
-import { dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
+import { DeckCount, dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
 import { GameState } from '../../client/assets/scripts/core/state/game-state';
 import { BrowserGameSession, BrowserSessionSnapshot } from '../../web/src/browser-session';
 import { c } from '../helpers/cards';
@@ -73,6 +73,53 @@ describe('browser game session', () => {
 
     expect(dispatched).toBe(false);
     expect(session.state).toBe(before);
+  });
+
+  describe('deck versions', () => {
+    it('starts two decks by default and one deck when chosen', async () => {
+      const two = new BrowserGameSession(414, { animationDelayMs: 0 });
+      expect(two.deckCount).toBe(2);
+      await two.start();
+      expect(two.state.deckCount).toBe(2);
+      expect(two.snapshot().state.deckCount).toBe(2);
+
+      const one = new BrowserGameSession(414, { animationDelayMs: 0, deckCount: 1 });
+      expect(one.deckCount).toBe(1);
+      expect(one.state.phase).toBe('SETUP');
+      await one.start();
+      const state = one.state;
+      expect(state.deckCount).toBe(1);
+      expect(one.snapshot().state.deckCount).toBe(1);
+      const allIds = [...state.players.flatMap((player) => player.hand.map((card) => card.id)), ...state.playedCardIds];
+      expect(allIds).toHaveLength(54);
+      expect(new Set(allIds).size).toBe(54);
+      // AI turns stop at the human seat, which has not acted yet, so it still holds its dealt 13 or 14 cards.
+      expect(state.players[0].hand).toEqual(dealFourPlayers(414, 1).hands[0]);
+      expect([13, 14]).toContain(one.viewModel.seats.bottom.remaining);
+    });
+
+    it('restarts the same seed with the same deck version and replays the same game', async () => {
+      for (const deckCount of [1, 2] as const) {
+        const first = new BrowserGameSession(2026, { animationDelayMs: 0, deckCount });
+        await first.start();
+        const again = first.replay();
+        expect(again).not.toBe(first);
+        expect(again.seed).toBe(2026);
+        expect(again.deckCount).toBe(deckCount);
+        expect(again.state.phase).toBe('SETUP');
+        await again.start();
+        expect(again.state).toEqual(first.state);
+        expect(again.state.deckCount).toBe(deckCount);
+      }
+    });
+
+    it('takes the deck version of an initial state and rejects unknown versions', () => {
+      const initialState = buildState({ deckCount: 1, phase: 'FREE_LEAD', currentPlayer: 0, hands: { 0: [c('h', Rank.FIVE)], 1: [c('x', Rank.SIX)], 2: [c('y', Rank.SEVEN)], 3: [c('z', Rank.EIGHT)] } });
+      expect(new BrowserGameSession(414, { animationDelayMs: 0, initialState }).deckCount).toBe(1);
+      for (const deckCount of [0, 3, 1.5]) {
+        expect(() => new BrowserGameSession(414, { deckCount: deckCount as DeckCount })).toThrow(RangeError);
+      }
+    });
   });
 
   describe('hidden gou-cha queries', () => {

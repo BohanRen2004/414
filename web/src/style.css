@@ -219,8 +219,19 @@ main { width: min(1420px, 100%); min-height: calc(100vh - 76px); margin: auto; p
 .start-card h1, .result-card h2, .help-card h2 { margin: 4px 0 9px; color: #eef4ec; font-size: 30px; font-weight: 550; letter-spacing: -.055em; }
 .start-card > p, .help-card > p { margin: 0; color: #a7b4aa; font-size: 12px; line-height: 1.8; }
 .seed-form { display: grid; gap: 10px; margin-top: 27px; }
-.seed-form label { display: flex; justify-content: space-between; align-items: end; color: #d8e1d7; font-size: 11px; font-weight: 650; }
-.seed-form label span { color: #84958a; font-size: 9px; font-weight: 400; }
+.field-label { display: flex; justify-content: space-between; align-items: end; color: #d8e1d7; font-size: 11px; font-weight: 650; }
+.field-label span { color: #84958a; font-size: 9px; font-weight: 400; }
+.deck-choice { display: grid; gap: 10px; margin-bottom: 6px; }
+.deck-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.deck-option { position: relative; cursor: pointer; }
+.deck-option input { position: absolute; opacity: 0; pointer-events: none; }
+.deck-option-body { display: grid; gap: 5px; padding: 11px 13px; border: 1px solid var(--line-strong); border-radius: 5px; background: rgb(5 13 10 / 28%); transition: border-color .15s ease, background .15s ease; }
+.deck-option-body b { color: #d8e1d7; font-size: 13px; font-weight: 650; }
+.deck-option-body small { color: #84958a; font-size: 9px; font-variant-numeric: tabular-nums; }
+.deck-option:hover .deck-option-body { border-color: rgb(224 235 215 / 28%); }
+.deck-option input:checked + .deck-option-body { border-color: rgb(168 217 189 / 55%); background: rgb(168 217 189 / 8%); }
+.deck-option input:checked + .deck-option-body b { color: var(--mint); }
+.deck-option input:focus-visible + .deck-option-body { outline: 2px solid var(--mint); outline-offset: 2px; }
 .seed-entry { height: 45px; display: flex; align-items: center; gap: 9px; padding: 0 13px; border: 1px solid var(--line-strong); border-radius: 5px; background: rgb(5 13 10 / 28%); }
 .seed-entry span { color: #82988a; }
 .seed-entry input { width: 100%; color: var(--ink); border: 0; outline: none; background: transparent; font-variant-numeric: tabular-nums; letter-spacing: .09em; }
@@ -316,7 +327,8 @@ main { width: min(1420px, 100%); min-height: calc(100vh - 76px); margin: auto; p
   .hero-mark { margin-top: 20px; font-size: 39px; }
   .hero-mark i { font-size: 34px; }
   .start-card h1 { font-size: 27px; }
-  .seed-form label { display: grid; gap: 5px; }
+  .field-label { display: grid; gap: 5px; }
+  .deck-option-body { padding: 10px 11px; }
   .result-card h2 { font-size: 23px; }
   .result-order li { grid-template-columns: 30px 1fr auto; gap: 8px; padding: 9px; }
   .result-order i { font-size: 7px; }

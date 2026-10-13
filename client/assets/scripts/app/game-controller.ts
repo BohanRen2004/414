@@ -5,6 +5,7 @@ import { GamePhase, GameState } from '../core/state/game-state';
 import { ActionResult, applyAction } from '../core/rules/reducer';
 import { RuleError } from '../core/state/rule-error';
 import { DiagnosticEntry, formatDiagnosticLog } from '../core/diagnostics/action-log';
+import { DEFAULT_DECK_COUNT } from '../core/cards/deck';
 import { AnimationSink } from './animation-queue';
 
 const MAX_ACCEPTED_ACTIONS = 20_000;
@@ -127,6 +128,7 @@ export class GameController {
       level: result.ok ? 'INFO' : 'WARN',
       seed: action.kind === 'START_GAME' ? action.seed : before.rootSeed,
       rulesVersion: before.rulesVersion,
+      deckCount: action.kind === 'START_GAME' ? action.deckCount ?? DEFAULT_DECK_COUNT : before.deckCount,
       actionNumber: before.actionNumber,
       phase: before.phase,
       ...(playerId === undefined ? {} : { playerId: playerId as 0 | 1 | 2 | 3 }),

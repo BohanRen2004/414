@@ -2,6 +2,7 @@ import { generateCandidates } from '../../client/assets/scripts/ai/candidates';
 import { buildObservation } from '../../client/assets/scripts/ai/ai-observation';
 import { AnimationSink } from '../../client/assets/scripts/app/animation-queue';
 import { GameController } from '../../client/assets/scripts/app/game-controller';
+import { DEFAULT_DECK_COUNT, DeckCount, isDeckCount } from '../../client/assets/scripts/core/cards/deck';
 import { GameEvent } from '../../client/assets/scripts/core/state/game-event';
 import { GameAction } from '../../client/assets/scripts/core/state/game-action';
 import { GameState } from '../../client/assets/scripts/core/state/game-state';
@@ -13,6 +14,8 @@ import { gouChaPendingFrame, hidesGouChaQuery, visibleEventsFor, visibleStateFor
 
 export interface BrowserGameOptions {
   readonly animationDelayMs?: number;
+  /** Game version to start: one deck (54 cards) or two decks (108 cards, the default). */
+  readonly deckCount?: DeckCount;
   /** Start from this state instead of an unstarted table (tests and replays). */
   readonly initialState?: GameState;
 }
@@ -56,6 +59,9 @@ export class BrowserGameSession {
   /** Rules state after the last presented transition, i.e. the state the next transition starts from. */
   private committed: GameState;
 
+  /** Game version this session starts; a replay keeps it. */
+  public readonly deckCount: DeckCount;
+
   public constructor(public readonly seed: number, options: BrowserGameOptions = {}) {
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffff_ffff) {
       throw new RangeError('seed must be an unsigned 32-bit integer');
@@ -63,6 +69,10 @@ export class BrowserGameSession {
     this.animationDelayMs = options.animationDelayMs ?? 130;
     if (!Number.isFinite(this.animationDelayMs) || this.animationDelayMs < 0) {
       throw new RangeError('animationDelayMs must be a nonnegative finite number');
+    }
+    this.deckCount = options.deckCount ?? options.initialState?.deckCount ?? DEFAULT_DECK_COUNT;
+    if (!isDeckCount(this.deckCount)) {
+      throw new RangeError('deckCount must be 1 (one deck) or 2 (two decks)');
     }
 
     const sink: AnimationSink = {
@@ -110,7 +120,12 @@ export class BrowserGameSession {
   }
 
   public async start(): Promise<boolean> {
-    return this.dispatch({ kind: 'START_GAME', seed: this.seed });
+    return this.dispatch({ kind: 'START_GAME', seed: this.seed, deckCount: this.deckCount });
+  }
+
+  /** A new, unstarted session for "同种子重开": the same seed, deck version and pacing, so it deals the same game. */
+  public replay(): BrowserGameSession {
+    return new BrowserGameSession(this.seed, { animationDelayMs: this.animationDelayMs, deckCount: this.deckCount });
   }
 
   public toggleCard(cardId: string): void {

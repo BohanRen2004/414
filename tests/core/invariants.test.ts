@@ -25,6 +25,35 @@ describe('game state invariants', () => {
     expect(() => assertGameState(createSetupState())).not.toThrow();
     const dealt = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed: 414 }));
     expect(() => assertGameState(dealt.state)).not.toThrow();
+    const oneDeck = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed: 414, deckCount: 1 }));
+    expect(() => assertGameState(oneDeck.state)).not.toThrow();
+    const oneDeckFixture = buildState({
+      deckCount: 1,
+      phase: 'FREE_LEAD',
+      currentPlayer: 0,
+      hands: { 0: [c('a', Rank.FIVE)], 1: [c('b', Rank.SIX)], 2: [c('c', Rank.SEVEN)], 3: [c('d', Rank.EIGHT)] },
+    });
+    expect(oneDeckFixture.playedCardIds).toHaveLength(50);
+    expect(() => assertGameState(oneDeckFixture)).not.toThrow();
+  });
+
+  it('checks card conservation against the total of the game\'s deck version', () => {
+    const one = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed: 414, deckCount: 1 })).state;
+    const two = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed: 414 })).state;
+    // 54 cards labelled as a two-deck game, 108 labelled as a one-deck game.
+    expectInvariant({ ...one, deckCount: 2 }, 'CARD_TOTAL');
+    expectInvariant({ ...two, deckCount: 1 }, 'CARD_TOTAL');
+    expect(() => assertGameState({ ...one, deckCount: 2 })).toThrow(/expected 108 cards/);
+    expect(() => assertGameState({ ...two, deckCount: 1 })).toThrow(/expected 54 cards/);
+    // A started game must name a known deck version.
+    expectInvariant({ ...one, deckCount: null }, 'CARD_TOTAL');
+    expectInvariant({ ...two, deckCount: 3 as unknown as GameState['deckCount'] }, 'CARD_TOTAL');
+    // One missing card in a one-deck game.
+    const [seat0, seat1, seat2, seat3] = one.players;
+    expectInvariant({ ...one, players: [{ ...seat0, hand: seat0.hand.slice(1) }, seat1, seat2, seat3] }, 'CARD_TOTAL');
+    const fixture = buildState({ deckCount: 1, phase: 'FREE_LEAD', currentPlayer: 0, hands: emptyHands });
+    expect(fixture.playedCardIds).toHaveLength(54);
+    expectInvariant({ ...fixture, playedCardIds: fixture.playedCardIds.slice(1) }, 'CARD_TOTAL');
   });
 
   it('detects duplicate IDs before checking total card count', () => {
@@ -353,9 +382,10 @@ describe('game state invariants', () => {
     }, 'PHASE_TRICK_MISMATCH');
   });
 
-  it('checks short seeded legal sequences and rejected-action immutability', () => {
-    fc.assert(fc.property(fc.integer({ min: 0, max: 0x7fff_ffff }), (seed) => {
-      let state = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed })).state;
+  it('checks short seeded legal sequences and rejected-action immutability in both deck versions', () => {
+    fc.assert(fc.property(fc.integer({ min: 0, max: 0x7fff_ffff }), fc.constantFrom(1 as const, 2 as const), (seed, deckCount) => {
+      const totalCards = deckCount * 54;
+      let state = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed, deckCount })).state;
       const rejectedSnapshot = structuredClone(state);
       const rejected = applyAction(state, {
         kind: 'PLAY_CARDS',
@@ -382,8 +412,8 @@ describe('game state invariants', () => {
         state = result.state;
         expect(() => assertGameState(state)).not.toThrow();
         const allIds = [...state.players.flatMap((player) => player.hand.map((card) => card.id)), ...state.playedCardIds];
-        expect(allIds).toHaveLength(108);
-        expect(new Set(allIds).size).toBe(108);
+        expect(allIds).toHaveLength(totalCards);
+        expect(new Set(allIds).size).toBe(totalCards);
         const handPositions = state.players.flatMap((player) => player.hand.map((card) =>
           `${card.deckIndex}:${card.suit}:${card.rank}`,
         ));
@@ -393,7 +423,7 @@ describe('game state invariants', () => {
         expect(new Set(state.players.flatMap((player) => player.finishPlace === null ? [] : [player.finishPlace])).size)
           .toBe(state.finishOrder.length);
       }
-    }), { numRuns: 80 });
+    }), { numRuns: 120 });
 
     fc.assert(fc.property(
       fc.constantFrom(Rank.THREE, Rank.FIVE, Rank.ACE, Rank.SMALL_JOKER, Rank.BIG_JOKER),
@@ -408,13 +438,14 @@ describe('game state invariants', () => {
       level: 'ERROR',
       seed: 414,
       rulesVersion: '1.1.0',
+      deckCount: 1,
       actionNumber: 7,
       phase: 'GOUCHA_QUERY',
       playerId: 2,
       code: 'PHASE_TRICK_MISMATCH',
       details: { zeta: true, alpha: 'gou-cha' },
     }]);
-    expect(log).toBe('{"seed":414,"rulesVersion":"1.1.0","actionNumber":7,"phase":"GOUCHA_QUERY","playerId":2,"code":"PHASE_TRICK_MISMATCH","details":{"alpha":"gou-cha","zeta":true},"level":"ERROR"}');
+    expect(log).toBe('{"seed":414,"rulesVersion":"1.1.0","deckCount":1,"actionNumber":7,"phase":"GOUCHA_QUERY","playerId":2,"code":"PHASE_TRICK_MISMATCH","details":{"alpha":"gou-cha","zeta":true},"level":"ERROR"}');
     expect(formatDiagnosticLog([])).toBe('');
   });
 });

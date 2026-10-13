@@ -1,11 +1,13 @@
 import { Card, PlayerId, Rank, Suit } from '../../client/assets/scripts/core/cards/card';
-import { createDoubleDeck, dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
+import { createDeck, DeckCount, dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
 import { CardGroup } from '../../client/assets/scripts/core/patterns/play-pattern';
 import { GamePhase, GameState, GouChaChain, PlayerState, TrickState } from '../../client/assets/scripts/core/state/game-state';
 import { hasFlexibleFixtureSuit } from './cards';
 
 export interface StateFixture {
   readonly seed?: number;
+  /** Deck version of the fixture; defaults to two decks. Cards not in a hand or on the table count as played. */
+  readonly deckCount?: DeckCount;
   readonly phase: GamePhase;
   readonly currentPlayer: PlayerId | null;
   readonly hands: Readonly<Record<PlayerId, readonly Card[]>>;
@@ -119,7 +121,8 @@ function playerState(playerId: PlayerId, hand: readonly Card[], finishOrder: rea
 }
 
 export function buildState(fixture: StateFixture): GameState {
-  const canonicalDeck = createDoubleDeck();
+  const deckCount = fixture.deckCount ?? 2;
+  const canonicalDeck = createDeck(deckCount);
   const unused = [...canonicalDeck];
   const hands = new Map<PlayerId, readonly Card[]>();
   const seenIds = new Set<string>();
@@ -205,7 +208,7 @@ export function buildState(fixture: StateFixture): GameState {
   }
 
   const seed = fixture.seed ?? (fixture.phase === 'SETUP' ? null : 414);
-  const setupDeal = seed === null ? null : dealFourPlayers(seed);
+  const setupDeal = seed === null ? null : dealFourPlayers(seed, deckCount);
   const playedCardIds = [...tableIds.keys(), ...unused.map((card) => card.id)];
   const allStateCardIds = [...players.flatMap((player) => player.hand.map((card) => card.id)), ...playedCardIds];
   if (allStateCardIds.length !== canonicalDeck.length || new Set(allStateCardIds).size !== canonicalDeck.length) {
@@ -215,6 +218,7 @@ export function buildState(fixture: StateFixture): GameState {
     rulesVersion: '1.1.0',
     phase: fixture.phase,
     rootSeed: seed,
+    deckCount: fixture.phase === 'SETUP' ? null : deckCount,
     randomState: setupDeal === null ? null : { deal: setupDeal.dealStateAfterSetup },
     firstPlayer: fixture.phase === 'SETUP' ? null : 0,
     players,

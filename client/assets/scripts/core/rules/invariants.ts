@@ -1,4 +1,5 @@
 import { PlayerId } from '../cards/card';
+import { deckSize, isDeckCount } from '../cards/deck';
 import { GameState } from '../state/game-state';
 import { gouChaCardIds } from './goucha';
 import { buildResult } from './results';
@@ -24,6 +25,9 @@ function assertCardConservation(state: GameState): void {
     return;
   }
 
+  if (!isDeckCount(state.deckCount)) {
+    fail('CARD_TOTAL', `a dealt game needs a deck count of 1 or 2, found ${String(state.deckCount)}`);
+  }
   const cardIds = [
     ...state.players.flatMap((player) => player.hand.map((card) => card.id)),
     ...state.playedCardIds,
@@ -33,8 +37,9 @@ function assertCardConservation(state: GameState): void {
     if (seen.has(id)) fail('CARD_DUPLICATED', `physical card ID ${id} appears more than once`);
     seen.add(id);
   }
-  if (cardIds.length !== 108) {
-    fail('CARD_TOTAL', `expected 108 cards across hands and played area, found ${cardIds.length}`);
+  const expected = deckSize(state.deckCount);
+  if (cardIds.length !== expected) {
+    fail('CARD_TOTAL', `expected ${expected} cards across hands and played area, found ${cardIds.length}`);
   }
 }
 

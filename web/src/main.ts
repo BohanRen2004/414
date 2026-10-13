@@ -1,11 +1,13 @@
 import { Card, Rank, Suit } from '../../client/assets/scripts/core/cards/card';
-import { createDoubleDeck } from '../../client/assets/scripts/core/cards/deck';
+import { createDoubleDeck, DEFAULT_DECK_COUNT, DeckCount } from '../../client/assets/scripts/core/cards/deck';
+import { DECK_OPTIONS, deckOption } from '../../client/assets/scripts/ui/deck-options';
 import { BrowserGameSession, BrowserSessionSnapshot } from './browser-session';
 import './style.css';
 
 const root = document.querySelector<HTMLDivElement>('#app');
 if (root === null) throw new Error('Missing #app root');
 
+// One deck uses the same card IDs as the first of two decks, so this map serves both versions.
 const allCards = new Map(createDoubleDeck().map((card) => [card.id, card]));
 const suitGlyph: Record<Suit, string> = {
   [Suit.CLUB]: '♣',
@@ -18,7 +20,9 @@ const suitGlyph: Record<Suit, string> = {
 let helpOpen = false;
 let notice = '';
 let noticeTimer: number | undefined;
-let session = new BrowserGameSession(readSeedFromUrl() ?? 414);
+/** Version picked on the start screen; "同种子重开" and "新开一局" keep it. */
+let chosenDeckCount: DeckCount = readDeckCountFromUrl() ?? DEFAULT_DECK_COUNT;
+let session = new BrowserGameSession(readSeedFromUrl() ?? 414, { deckCount: chosenDeckCount });
 let unsubscribe = session.subscribe(render);
 
 function escapeHtml(value: string | number): string {
@@ -36,6 +40,16 @@ function readSeedFromUrl(): number | null {
   if (value === null || !/^\d{1,10}$/.test(value)) return null;
   const seed = Number(value);
   return Number.isSafeInteger(seed) && seed >= 0 && seed <= 0xffff_ffff ? seed : null;
+}
+
+function readDeckCountFromUrl(): DeckCount | null {
+  const value = new URLSearchParams(window.location.search).get('decks');
+  return value === '1' ? 1 : value === '2' ? 2 : null;
+}
+
+/** The started game's version, or the one chosen for the next start. */
+function shownDeckCount(snapshot: BrowserSessionSnapshot): DeckCount {
+  return snapshot.state.deckCount ?? chosenDeckCount;
 }
 
 function formatSeed(seed: number): string {
@@ -111,7 +125,7 @@ function humanError(snapshot: BrowserSessionSnapshot): string {
   return messages[code] ?? `操作未生效（${code}）`;
 }
 
-function renderCard(card: Card, selected: boolean, compact = false): string {
+function renderCard(card: Card, selected: boolean, compact = false, showCopy = true): string {
   const red = card.suit === Suit.HEART || card.suit === Suit.DIAMOND || card.rank === Rank.BIG_JOKER;
   const rank = rankLabel(card.rank);
   const glyph = suitGlyph[card.suit];
@@ -120,20 +134,24 @@ function renderCard(card: Card, selected: boolean, compact = false): string {
   return `<span class="${classes}" aria-label="${escapeHtml(rank)}${glyph}">
     <span class="card-corner"><strong>${escapeHtml(rank)}</strong><i>${glyph}</i></span>
     <span class="card-center-suit">${glyph}</span>
-    <span class="card-copy">${card.deckIndex === 0 ? 'I' : 'II'}</span>
+    ${showCopy ? `<span class="card-copy">${card.deckIndex === 0 ? 'I' : 'II'}</span>` : ''}
   </span>`;
 }
 
 function renderHand(snapshot: BrowserSessionSnapshot): string {
   const hand = snapshot.viewModel.seats.bottom.cards ?? [];
-  if (hand.length === 0) return '<p class="empty-hand">开局后，你的 27 张手牌会在这里显示。</p>';
+  if (hand.length === 0) {
+    return `<p class="empty-hand">开局后，你的 <span data-deck-hand>${deckOption(shownDeckCount(snapshot)).handSizeLabel}</span> 张手牌会在这里显示。</p>`;
+  }
+  // With one deck every card is unique, so the copy mark (I/II) would only add noise.
+  const showCopy = shownDeckCount(snapshot) === 2;
   const selected = new Set(snapshot.selectedCardIds);
   const prompt = snapshot.viewModel.gouCha;
   const eligible = prompt === null ? null : new Set(prompt.eligibleCardIds);
   return `<div class="hand-track" aria-label="你的手牌">${sortHand(hand).map((card) => {
     const active = selected.has(card.id);
     const ineligible = eligible !== null && !eligible.has(card.id);
-    const cardHtml = renderCard(card, active);
+    const cardHtml = renderCard(card, active, false, showCopy);
     return `<button class="hand-card ${active ? 'is-picked' : ''} ${ineligible ? 'is-ineligible' : ''}"
       type="button" data-action="toggle-card" data-card-id="${escapeHtml(card.id)}"
       aria-label="选择 ${escapeHtml(rankLabel(card.rank))}${suitGlyph[card.suit]}"
@@ -171,7 +189,7 @@ function renderCenter(snapshot: BrowserSessionSnapshot): string {
   const center = snapshot.viewModel.center;
   const currentCards = center.cardIds.flatMap((id) => {
     const card = allCards.get(id);
-    return card === undefined ? [] : [renderCard(card, false, true)];
+    return card === undefined ? [] : [renderCard(card, false, true, shownDeckCount(snapshot) === 2)];
   });
   const holder = center.holderId;
   const history = snapshot.state.publicHistory.slice(-4).reverse().map((entry) => {
@@ -231,7 +249,7 @@ function renderResult(snapshot: BrowserSessionSnapshot): string {
   if (result === null) return '';
   const order = result.places.map((playerId, index) => `<li><span class="result-place">0${index + 1}</span><span>${playerName(playerId)}</span><i>${playerId % 2 === result.winningTeam ? 'WINNING TEAM' : 'OPPONENT'}</i></li>`).join('');
   return `<div class="modal-scrim"><section class="result-card" role="dialog" aria-modal="true" aria-labelledby="result-title">
-    <span class="eyebrow">ROUND COMPLETE · ${formatSeed(result.seed)}</span>
+    <span class="eyebrow">ROUND COMPLETE · ${formatSeed(result.seed)} · ${deckOption(shownDeckCount(snapshot)).label}</span>
     <h2 id="result-title">${result.winningTeam === 0 ? '蓝队拿下这局' : '金队拿下这局'}</h2>
     <p class="result-subtitle">抓 ${result.capturedOpponents} 人 · 单局结算</p>
     <ol class="result-order">${order}</ol>
@@ -245,14 +263,26 @@ function renderHelp(): string {
     <section class="help-card" role="dialog" aria-modal="true" aria-labelledby="help-title" data-dialog>
       <button class="icon-button help-close" data-action="close-help" aria-label="关闭帮助">×</button>
       <span class="eyebrow">QUICK RULES</span><h2 id="help-title">一局 4A4，四人两队</h2>
-      <p>座位 0 和 2 为蓝队，座位 1 和 3 为金队。每人 27 张牌，轮流严格压牌或选择不出。</p>
-      <div class="rule-grid"><article><b>牌型</b><span>单张、对子、单/双/三顺、轰/炸弹、王炸、4A4。</span></article>
-        <article><b>勾岔</b><span>单牌可以被另一人用同点数对子“岔”；岔后才轮到另一人用同点数单牌“勾”，岔、勾交替，不能自己接自己的牌。岔和勾是动作，不是牌型：有人岔过后链条一停，这一轮立刻结束（死岔/死勾），谁也不能再压，最后岔或勾的人接着出牌。</span></article>
+      <p>座位 0 和 2 为蓝队，座位 1 和 3 为金队。两副牌每人 27 张；一副牌 54 张，每队一人 14 张、一人 13 张。轮流严格压牌或选择不出。</p>
+      <div class="rule-grid"><article><b>首家</b><span>持红桃 3 的玩家先出。两副牌时依次比较红桃 3、黑桃 3、梅花 3、方块 3 的张数，多者先出，仍相同时按种子决定。首家可出任意合法牌型。</span></article>
+        <article><b>牌型</b><span>单张、对子、单/双/三顺、轰/炸弹、王炸、4A4。一副牌没有 5 张以上的同点数和红桃 4A4。</span></article>
+        <article><b>勾岔</b><span>单牌可以被另一人用同点数对子“岔”；岔后才轮到另一人用同点数单牌“勾”，岔、勾交替，不能自己接自己的牌。岔和勾是动作，不是牌型：有人岔过后链条一停，这一轮立刻结束（死岔/死勾），谁也不能再压，最后岔或勾的人接着出牌。一副牌每个点数只有 4 张，单、岔、勾之后链条自然停止。</span></article>
         <article><b>结束</b><span>只剩一人有牌时结算；队友出完顺序决定抓人数。种子可复制分享并复现同一局。</span></article>
       </div>
       <button class="button button-primary" data-action="close-help">明白了</button>
     </section>
   </div>`;
+}
+
+function renderDeckChoice(): string {
+  const options = DECK_OPTIONS.map((option) => `<label class="deck-option">
+      <input type="radio" name="deck" value="${option.deckCount}" ${option.deckCount === chosenDeckCount ? 'checked' : ''} />
+      <span class="deck-option-body"><b>${escapeHtml(option.label)}</b><small>${escapeHtml(option.summary)}</small></span>
+    </label>`).join('');
+  return `<div class="deck-choice" role="radiogroup" aria-labelledby="deck-label">
+      <span id="deck-label" class="field-label">牌数 <span>规则、AI 和结算两种都一样</span></span>
+      <div class="deck-options">${options}</div>
+    </div>`;
 }
 
 function renderStart(snapshot: BrowserSessionSnapshot): string {
@@ -263,12 +293,13 @@ function renderStart(snapshot: BrowserSessionSnapshot): string {
     <h1 id="start-title">一局 4A4</h1>
     <p>把注意力留给牌桌。固定 2 对 2，三位基础 AI，完全离线。</p>
     <form id="start-form" class="seed-form">
-      <label for="seed-input">随机种子 <span>相同种子会复现相同发牌与 AI 决策</span></label>
+      ${renderDeckChoice()}
+      <label for="seed-input" class="field-label">随机种子 <span>相同种子和牌数会复现相同发牌与 AI 决策</span></label>
       <div class="seed-entry"><span>#</span><input id="seed-input" name="seed" inputmode="numeric" pattern="[0-9]{1,10}" maxlength="10" value="${snapshot.state.rootSeed ?? session.seed}" aria-describedby="seed-error" /></div>
       <p id="seed-error" class="inline-error" role="alert"></p>
       <button class="button button-primary start-button" type="submit">开始练习 <span>→</span></button>
     </form>
-    <div class="start-foot"><span>108 张牌 · 每人 27 张</span><span>规则版本 ${escapeHtml(snapshot.state.rulesVersion)}</span></div>
+    <div class="start-foot"><span data-deck-summary>${escapeHtml(deckOption(chosenDeckCount).summary)}</span><span>规则版本 ${escapeHtml(snapshot.state.rulesVersion)}</span></div>
   </section></div>`;
 }
 
@@ -288,7 +319,7 @@ function render(snapshot: BrowserSessionSnapshot): void {
       </nav>
     </header>
     <main>
-      <div class="table-heading"><div><span class="eyebrow">4A4 · SINGLE ROUND</span><h2>练习牌桌</h2></div>
+      <div class="table-heading"><div><span class="eyebrow">4A4 · SINGLE ROUND · <span data-deck-label>${deckOption(shownDeckCount(snapshot)).label}</span></span><h2>练习牌桌</h2></div>
         <div class="round-progress"><span>固定队伍</span><b>0 / 2 <i>VS</i> 1 / 3</b></div></div>
       <section class="table-grid" aria-label="4A4 牌桌">
         ${renderSeat('top', snapshot)}
@@ -319,13 +350,15 @@ function setNotice(message: string): void {
   }, 2400);
 }
 
-function replaceSession(seed: number): void {
+function replaceSession(next: BrowserGameSession): void {
   unsubscribe();
   helpOpen = false;
-  session = new BrowserGameSession(seed);
+  session = next;
+  chosenDeckCount = next.deckCount;
   unsubscribe = session.subscribe(render);
   const url = new URL(window.location.href);
-  url.searchParams.set('seed', String(seed));
+  url.searchParams.set('seed', String(next.seed));
+  url.searchParams.set('decks', String(next.deckCount));
   window.history.replaceState({}, '', url);
 }
 
@@ -348,7 +381,9 @@ root.addEventListener('submit', async (event) => {
     seedInput?.focus();
     return;
   }
-  replaceSession(seed);
+  const deck = form.querySelector<HTMLInputElement>('input[name="deck"]:checked');
+  if (deck !== null) chosenDeckCount = deck.value === '1' ? 1 : 2;
+  replaceSession(new BrowserGameSession(seed, { deckCount: chosenDeckCount }));
   const started = await session.start();
   if (!started) setNotice(`无法开始游戏：${session.lastErrorCode ?? '未知错误'}`);
 });
@@ -382,14 +417,25 @@ root.addEventListener('click', async (event) => {
   }
   if (action === 'decline-goucha') { await session.declineGouCha(); return; }
   if (action === 'replay') {
-    replaceSession(session.seed);
+    replaceSession(session.replay());
     await session.start();
     return;
   }
   if (action === 'new-game') {
-    replaceSession(Date.now() >>> 0);
+    replaceSession(new BrowserGameSession(Date.now() >>> 0, { deckCount: session.deckCount }));
     return;
   }
+});
+
+// Switching the version updates its counts in place, so a seed being typed is not re-rendered away.
+root.addEventListener('change', (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement) || input.name !== 'deck' || !input.checked) return;
+  chosenDeckCount = input.value === '1' ? 1 : 2;
+  const option = deckOption(chosenDeckCount);
+  root.querySelectorAll('[data-deck-summary]').forEach((element) => { element.textContent = option.summary; });
+  root.querySelectorAll('[data-deck-hand]').forEach((element) => { element.textContent = option.handSizeLabel; });
+  root.querySelectorAll('[data-deck-label]').forEach((element) => { element.textContent = option.label; });
 });
 
 root.addEventListener('keydown', async (event) => {

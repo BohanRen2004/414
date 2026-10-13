@@ -1,4 +1,5 @@
 import { Card, PlayerId, Rank, TeamId } from '../cards/card';
+import type { DeckCount } from '../cards/deck';
 import { CardGroup } from '../patterns/play-pattern';
 import { RULES_VERSION } from '../index';
 
@@ -72,6 +73,8 @@ export interface GameState {
   readonly rulesVersion: typeof RULES_VERSION;
   readonly phase: GamePhase;
   readonly rootSeed: number | null;
+  /** Game version set by START_GAME: one deck (54 cards) or two decks (108 cards); null before the deal. */
+  readonly deckCount: DeckCount | null;
   readonly randomState: { readonly deal: number } | null;
   readonly firstPlayer: PlayerId | null;
   readonly players: readonly [PlayerState, PlayerState, PlayerState, PlayerState];

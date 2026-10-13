@@ -92,6 +92,37 @@ describe('corrected single-card gou-cha', () => {
     expect(finalGou.state.players[1].hand.map((card) => card.id)).toEqual(['1-last-five', '1-ten']);
   });
 
+  it('with one deck, stops a chain at four cards: single, CHA, GOU, then nobody can CHA again', () => {
+    const state = buildState({
+      deckCount: 1,
+      phase: 'FREE_LEAD',
+      currentPlayer: 0,
+      hands: {
+        0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+        1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE), c('1-ten', Rank.TEN)],
+        2: [c('2-gou', Rank.FIVE), c('2-jack', Rank.JACK)],
+        3: [c('3-queen', Rank.QUEEN)],
+      },
+    });
+    // One deck has exactly four fives, all of them in this fixture.
+    expect(() => buildState({
+      deckCount: 1,
+      phase: 'FREE_LEAD',
+      currentPlayer: 0,
+      hands: { 0: [c('a', Rank.FIVE), c('b', Rank.FIVE), c('c', Rank.FIVE), c('d', Rank.FIVE), c('e', Rank.FIVE)], 1: [], 2: [], 3: [] },
+    })).toThrow(/physical card supply/);
+
+    let next = dispatch(state, { kind: 'PLAY_CARDS', playerId: 0, cardIds: ['lead-five'] });
+    expect(next).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 1 });
+    next = dispatch(next, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
+    expect(next).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 2 });
+    const gou = expectSuccess(applyAction(next, { kind: 'ADD_GOUCHA', playerId: 2, addition: 'GOU', cardIds: ['2-gou'] }));
+    // All four fives are on the table, so the chain is dead at once and the GOU player leads.
+    expect(gou.state).toMatchObject({ phase: 'FREE_LEAD', currentPlayer: 2, trick: null, deckCount: 1 });
+    expect(gou.state.publicHistory.map((record) => record.cardIds.length)).toEqual([1, 2, 1]);
+    expect(gou.events.slice(-2)).toEqual([{ kind: 'TRICK_RESET' }, { kind: 'TURN_CHANGED', playerId: 2 }]);
+  });
+
   it('does not start from a pair or any straight/bomb pattern', () => {
     const hands = {
       0: [c('pair-a', Rank.FIVE), c('pair-b', Rank.FIVE)],
