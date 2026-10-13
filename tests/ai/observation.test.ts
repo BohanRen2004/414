@@ -3,6 +3,7 @@ import { buildObservation } from '../../client/assets/scripts/ai/ai-observation'
 import { chooseBasicAiAction } from '../../client/assets/scripts/ai/basic-ai';
 import { PlayerId } from '../../client/assets/scripts/core/cards/card';
 import { dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
+import { XorShift32 } from '../../client/assets/scripts/core/random/prng';
 import { applyAction, createSetupState } from '../../client/assets/scripts/core/rules/reducer';
 import { GameState } from '../../client/assets/scripts/core/state/game-state';
 import { expectSuccess } from '../helpers/actions';
@@ -21,14 +22,20 @@ function allAiGameAfter(seed: number, actions: number): GameState {
   return state;
 }
 
-/** Trade the first card of two seats, keeping every public hand size unchanged. */
-function swapFirstCards(state: GameState, left: PlayerId, right: PlayerId): GameState {
-  const leftHand = state.players[left].hand;
-  const rightHand = state.players[right].hand;
+/** Reshuffle every card the viewer cannot see among the other seats, keeping each public hand size. */
+function redealHiddenCards(state: GameState, viewer: PlayerId, shuffleSeed: number): GameState {
+  const pool = state.players.filter((player) => player.playerId !== viewer).flatMap((player) => player.hand);
+  const random = new XorShift32(shuffleSeed);
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const swap = random.nextInt(index + 1);
+    [pool[index], pool[swap]] = [pool[swap]!, pool[index]!];
+  }
+  let offset = 0;
   const players = state.players.map((player) => {
-    if (player.playerId === left) return { ...player, hand: [rightHand[0]!, ...leftHand.slice(1)] };
-    if (player.playerId === right) return { ...player, hand: [leftHand[0]!, ...rightHand.slice(1)] };
-    return player;
+    if (player.playerId === viewer) return player;
+    const hand = pool.slice(offset, offset + player.hand.length);
+    offset += player.hand.length;
+    return { ...player, hand };
   }) as unknown as GameState['players'];
   return { ...state, players };
 }
@@ -43,7 +50,7 @@ describe('AI observation privacy', () => {
     });
     const observation = buildObservation(state, 1);
 
-    expect(observation.ownHand.map((card) => card.id)).toEqual(state.players[1].hand.map((card) => card.id));
+    expect(observation.ownHand.map((card) => card.id).sort()).toEqual(state.players[1].hand.map((card) => card.id).sort());
     expect(observation.ownHand).not.toBe(state.players[1].hand);
     expect(observation.publicPlayers.map((player) => player.remaining)).toEqual([27, 27, 27, 27]);
     expect(observation.publicPlayers.map((player) => player.teamId)).toEqual([0, 1, 0, 1]);
@@ -69,24 +76,47 @@ describe('AI observation privacy', () => {
   });
 
   it('stays identical when only the deal seed or other players\' cards differ', () => {
-    const state = allAiGameAfter(414, 12);
-    const playerId = state.currentPlayer!;
-    const [left, right] = ([0, 1, 2, 3] as const).filter((seat) => seat !== playerId);
-    const otherDeal = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed: 2026 })).state;
-    const hiddenChanged: GameState = {
-      ...swapFirstCards(state, left!, right!),
-      rootSeed: otherDeal.rootSeed,
-      randomState: otherDeal.randomState,
-    };
-
-    expect(buildObservation(hiddenChanged, playerId)).toEqual(buildObservation(state, playerId));
+    const otherDeal = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed: 99 })).state;
+    for (const seed of [414, 2026, 77]) {
+      for (const actions of [0, 5, 12]) {
+        const state = allAiGameAfter(seed, actions);
+        for (const viewer of [0, 1, 2, 3] as const) {
+          const hidden: GameState = {
+            ...redealHiddenCards(state, viewer, seed + actions + viewer),
+            rootSeed: otherDeal.rootSeed,
+            randomState: otherDeal.randomState,
+          };
+          expect(hidden.players.map((player) => player.hand)).not.toEqual(state.players.map((player) => player.hand));
+          expect(buildObservation(hidden, viewer), `seed ${seed}, ${actions} actions, seat ${viewer}`)
+            .toEqual(buildObservation(state, viewer));
+        }
+      }
+    }
   });
 
-  it('varies the tie-break value as the public history grows', () => {
-    const values = [4, 5, 6, 7].map((actions) => {
-      const state = allAiGameAfter(414, actions);
-      return buildObservation(state, state.currentPlayer!).decisionRandom;
-    });
+  it('does not reveal the dealt order of its own hand', () => {
+    const state = allAiGameAfter(414, 3);
+    const reordered: GameState = {
+      ...state,
+      players: state.players.map((player) => (
+        player.playerId === 1 ? { ...player, hand: [...player.hand].reverse() } : player
+      )) as unknown as GameState['players'],
+    };
+    expect(buildObservation(reordered, 1)).toEqual(buildObservation(state, 1));
+  });
+
+  it('keys the tie-break value on which cards were played, not the order they were picked in', () => {
+    let state = allAiGameAfter(414, 0);
+    while (!state.publicHistory.some((record) => record.cardIds.length > 1)) state = allAiGameAfter(414, state.actionNumber);
+    const repicked: GameState = {
+      ...state,
+      publicHistory: state.publicHistory.map((record) => ({ ...record, cardIds: [...record.cardIds].reverse() })),
+    };
+    expect(buildObservation(repicked, 0).decisionRandom).toBe(buildObservation(state, 0).decisionRandom);
+  });
+
+  it('varies one seat\'s tie-break value as the public history grows', () => {
+    const values = [4, 8, 12, 16].map((actions) => buildObservation(allAiGameAfter(414, actions), 0).decisionRandom);
     expect(new Set(values).size).toBe(values.length);
   });
 

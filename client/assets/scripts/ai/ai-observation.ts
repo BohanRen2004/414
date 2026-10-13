@@ -41,6 +41,11 @@ function hashPublicView(text: string): number {
   return (hash ^ (hash >>> 16)) >>> 0;
 }
 
+/** Canonical order, so the shuffled deal order of the hand never reaches the AI. */
+function compareCards(left: Card, right: Card): number {
+  return left.rank - right.rank || left.suit - right.suit || left.deckIndex - right.deckIndex;
+}
+
 /** Build a detached, information-safe view for one seat. */
 export function buildObservation(state: GameState, playerId: PlayerId): AiObservation {
   if (!Number.isInteger(playerId) || playerId < 0 || playerId > 3) {
@@ -56,13 +61,19 @@ export function buildObservation(state: GameState, playerId: PlayerId): AiObserv
     && player.hand.length > 0
     && player.finishPlace === null;
   const canAdd = currentPlayer && chain !== null && canAddGouCha(state, playerId);
-  const decisionRandom = hashPublicView(JSON.stringify([playerId, state.actionNumber, state.publicHistory]));
+  const publicView = state.publicHistory.map((record) => [
+    record.actionNumber,
+    record.playerId,
+    record.kind,
+    [...record.cardIds].sort(),
+  ]);
+  const decisionRandom = hashPublicView(JSON.stringify([playerId, state.actionNumber, publicView]));
 
   return {
     playerId,
     isCurrentPlayer: currentPlayer,
     teamId: player.teamId,
-    ownHand: player.hand.map((card) => ({ ...card })),
+    ownHand: [...player.hand].sort(compareCards).map((card) => ({ ...card })),
     publicPlayers: state.players.map((seat) => ({
       playerId: seat.playerId,
       teamId: seat.teamId,

@@ -166,7 +166,7 @@ function semanticValues(score: CandidateScore): readonly number[] {
   ];
 }
 
-/** Compare semantic score only; stable physical IDs order ties before seeded selection. */
+/** Compare semantic score only; stable physical IDs order ties before the public-view tie-break. */
 export function compareCandidateScores(left: CandidateScore, right: CandidateScore): number {
   const a = semanticValues(left);
   const b = semanticValues(right);
