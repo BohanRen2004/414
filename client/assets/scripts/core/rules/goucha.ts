@@ -216,20 +216,22 @@ export function addGouCha(
   return { ok: true, state: next, events };
 }
 
+/**
+ * A decline is private: who was asked and who declined is never public, so it adds no history
+ * record and takes no action number (a gap in the numbering would reveal it).
+ */
 export function declineGouCha(state: GameState, playerId: PlayerId): ActionResult {
   const chain = state.trick?.gouCha;
   if (state.phase !== 'GOUCHA_QUERY' || chain === null || chain === undefined) return error('WRONG_PHASE');
   if (playerId === chain.holderId) return error('SELF_GOUCHA_FORBIDDEN');
   if (state.currentPlayer !== playerId) return error('NOT_CURRENT_PLAYER', { playerId });
 
-  const actionData = appendAction(state, playerId, 'DECLINE_GOUCHA', []);
   const declinedChain = {
     ...chain,
     declinedPlayerIds: [...chain.declinedPlayerIds, playerId],
   };
   const declined: GameState = {
     ...state,
-    ...actionData,
     currentPlayer: null,
     trick: { ...state.trick!, gouCha: declinedChain },
   };

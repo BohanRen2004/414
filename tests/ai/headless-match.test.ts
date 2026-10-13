@@ -69,10 +69,11 @@ describe('serialized controller and headless match', () => {
     }
     const latestState = controller.state;
     expect(latestState.actionNumber).toBe(initial.actionNumber + 1);
-    const secondResult = await controller.dispatch(nextAction(latestState));
+    const secondAction = nextAction(latestState);
+    const secondResult = await controller.dispatch(secondAction);
     expect(secondResult.ok).toBe(true);
     if (secondResult.ok) expect(secondResult.state).toBe(controller.state);
-    expect(controller.state.actionNumber).toBe(initial.actionNumber + 2);
+    expect(controller.state).toEqual(expectSuccess(applyAction(latestState, secondAction)).state);
     expect(controller.actionCount).toBe(2);
   });
 
@@ -254,6 +255,7 @@ describe('serialized controller and headless match', () => {
 
   it('finishes 100 seeded all-AI matches with unique places and deterministic seed-414 output', async () => {
     let seed414: Awaited<ReturnType<typeof runHeadlessMatch>> | undefined;
+    let totalPrivateDeclines = 0;
     for (let offset = 0; offset < 100; offset += 1) {
       const seed = (414 + offset * 9_973) >>> 0;
       const match = await runHeadlessMatch(seed, 20_000);
@@ -263,10 +265,18 @@ describe('serialized controller and headless match', () => {
       expect(match.finalState.finishOrder).toHaveLength(4);
       expect(new Set(match.finalState.finishOrder).size).toBe(4);
       expect(new Set(match.finalState.players.map((player) => player.finishPlace)).size).toBe(4);
-      expect(match.finalState.publicHistory).toHaveLength(match.actionCount);
-      expect(match.diagnosticLog.split('\n')).toHaveLength(match.actionCount);
+      const logLines = match.diagnosticLog.split('\n');
+      expect(logLines).toHaveLength(match.actionCount);
+      const privateDeclines = logLines.filter((line) => JSON.parse(line).details.actionKind === 'DECLINE_GOUCHA').length;
+      totalPrivateDeclines += privateDeclines;
+      expect(match.finalState.publicHistory).toHaveLength(match.actionCount - privateDeclines);
+      expect(match.finalState.publicHistory.map((record) => record.actionNumber))
+        .toEqual(match.finalState.publicHistory.map((_record, index) => index + 1));
+      expect(match.finalState.actionNumber).toBe(match.finalState.publicHistory.length + 1);
       if (seed === 414) seed414 = match;
     }
+
+    expect(totalPrivateDeclines).toBeGreaterThan(0);
 
     const seed414Replay = await runHeadlessMatch(414, 20_000);
     expect(seed414).toBeDefined();

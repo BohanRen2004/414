@@ -48,10 +48,11 @@ export interface TrickState {
   readonly gouCha: GouChaChain | null;
 }
 
+/** Only actions every seat sees; a private gou-cha decline is never recorded. */
 export interface PublicActionRecord {
   readonly actionNumber: number;
   readonly playerId: PlayerId;
-  readonly kind: 'PLAY_CARDS' | 'PASS' | 'CHA' | 'GOU' | 'DECLINE_GOUCHA';
+  readonly kind: 'PLAY_CARDS' | 'PASS' | 'CHA' | 'GOU';
   readonly cardIds: readonly string[];
 }
 

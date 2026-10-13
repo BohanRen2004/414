@@ -144,7 +144,7 @@ describe('corrected single-card gou-cha', () => {
     state = dispatch(state, { kind: 'DECLINE_GOUCHA', playerId: 1 });
     expect(state.currentPlayer).toBe(2);
     expect(state.trick?.passedPlayerIds).toEqual([]);
-    expect(state.publicHistory[state.publicHistory.length - 1]).toMatchObject({ kind: 'DECLINE_GOUCHA', playerId: 1, cardIds: [] });
+    expect(state.trick?.gouCha?.declinedPlayerIds).toEqual([1]);
 
     state = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 2, addition: 'CHA', cardIds: ['2-cha-a', '2-cha-b'] });
     expect(state.currentPlayer).toBe(3);
@@ -166,7 +166,60 @@ describe('corrected single-card gou-cha', () => {
     expect(state.trick?.gouCha).toBeNull();
     expect(state.trick?.currentPlay).toMatchObject({ pattern: { kind: 'SINGLE', rank: Rank.FIVE } });
     expect(state.trick?.passedPlayerIds).toEqual([]);
-    expect(state.publicHistory.map((record) => record.kind)).toEqual(['PLAY_CARDS', 'DECLINE_GOUCHA']);
+    expect(state.publicHistory.map((record) => record.kind)).toEqual(['PLAY_CARDS']);
+  });
+
+  it('keeps a decline private: no public record and no action number', () => {
+    const queried = startSingleFive({
+      0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+      1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE), c('1-nine', Rank.NINE)],
+      2: [c('2-cha-a', Rank.FIVE), c('2-cha-b', Rank.FIVE), c('2-ten', Rank.TEN)],
+      3: [c('3-jack', Rank.JACK)],
+    });
+    const declined = expectSuccess(applyAction(queried, { kind: 'DECLINE_GOUCHA', playerId: 1 }));
+    expect(declined.state.publicHistory).toEqual(queried.publicHistory);
+    expect(declined.state.actionNumber).toBe(queried.actionNumber);
+    expect(declined.state).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 2 });
+    expect(declined.events).toEqual([
+      { kind: 'GOUCHA_DECLINED', playerId: 1 },
+      { kind: 'TURN_CHANGED', playerId: 2 },
+    ]);
+
+    const added = dispatch(declined.state, { kind: 'ADD_GOUCHA', playerId: 2, addition: 'CHA', cardIds: ['2-cha-a', '2-cha-b'] });
+    expect(added.publicHistory).toEqual([
+      { actionNumber: 1, playerId: 0, kind: 'PLAY_CARDS', cardIds: ['lead-five'] },
+      { actionNumber: 2, playerId: 2, kind: 'CHA', cardIds: ['2-cha-a', '2-cha-b'] },
+    ]);
+    expect(added.actionNumber).toBe(3);
+    expect(added.trick?.currentPlay.actionNumber).toBe(2);
+  });
+
+  it('leaves the same public state whether or not a hidden seat was asked and declined', () => {
+    const asked = startSingleFive({
+      0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+      1: [c('1-six', Rank.SIX), c('1-seven', Rank.SEVEN)],
+      2: [c('2-five-a', Rank.FIVE), c('2-five-b', Rank.FIVE), c('2-ten', Rank.TEN)],
+      3: [c('3-jack', Rank.JACK)],
+    });
+    expect(asked).toMatchObject({ phase: 'GOUCHA_QUERY', currentPlayer: 2 });
+    const afterDecline = dispatch(asked, { kind: 'DECLINE_GOUCHA', playerId: 2 });
+    const neverAsked = startSingleFive({
+      0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
+      1: [c('1-six', Rank.SIX), c('1-seven', Rank.SEVEN)],
+      2: [c('2-five-a', Rank.FIVE), c('2-six', Rank.SIX), c('2-ten', Rank.TEN)],
+      3: [c('3-jack', Rank.JACK)],
+    });
+    expect(neverAsked.phase).toBe('RESPONDING');
+
+    const publicPart = (state: GameState) => ({
+      phase: state.phase,
+      currentPlayer: state.currentPlayer,
+      trick: state.trick,
+      publicHistory: state.publicHistory,
+      actionNumber: state.actionNumber,
+      remaining: state.players.map((player) => player.hand.length),
+    });
+    expect(publicPart(afterDecline)).toEqual(publicPart(neverAsked));
   });
 
   it('rejects wrong stage, count, rank, and self-add without changing the source state', () => {

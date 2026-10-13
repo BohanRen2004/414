@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { buildObservation } from '../../client/assets/scripts/ai/ai-observation';
 import { chooseBasicAiAction } from '../../client/assets/scripts/ai/basic-ai';
-import { PlayerId } from '../../client/assets/scripts/core/cards/card';
+import { Card, PlayerId, Rank } from '../../client/assets/scripts/core/cards/card';
 import { dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
 import { XorShift32 } from '../../client/assets/scripts/core/random/prng';
 import { applyAction, createSetupState } from '../../client/assets/scripts/core/rules/reducer';
 import { GameState } from '../../client/assets/scripts/core/state/game-state';
-import { expectSuccess } from '../helpers/actions';
+import { c } from '../helpers/cards';
+import { dispatch, expectSuccess } from '../helpers/actions';
 import { buildState } from '../helpers/state-builder';
 
 function allAiGameAfter(seed: number, actions: number): GameState {
@@ -107,7 +108,9 @@ describe('AI observation privacy', () => {
 
   it('keys the tie-break value on which cards were played, not the order they were picked in', () => {
     let state = allAiGameAfter(414, 0);
-    while (!state.publicHistory.some((record) => record.cardIds.length > 1)) state = allAiGameAfter(414, state.actionNumber);
+    for (let actions = 1; !state.publicHistory.some((record) => record.cardIds.length > 1); actions += 1) {
+      state = allAiGameAfter(414, actions);
+    }
     const repicked: GameState = {
       ...state,
       publicHistory: state.publicHistory.map((record) => ({ ...record, cardIds: [...record.cardIds].reverse() })),
@@ -118,6 +121,70 @@ describe('AI observation privacy', () => {
   it('varies one seat\'s tie-break value as the public history grows', () => {
     const values = [4, 8, 12, 16].map((actions) => buildObservation(allAiGameAfter(414, actions), 0).decisionRandom);
     expect(new Set(values).size).toBe(values.length);
+  });
+
+  describe('hidden gou-cha queries', () => {
+    type PairHolder = 1 | 2 | null;
+
+    /** Seats 1 and 2 split the same hidden cards; only which of them (if any) holds a pair of fives differs. */
+    function hiddenHands(pairAt: PairHolder): Record<1 | 2, Card[]> {
+      if (pairAt === 1) {
+        return {
+          1: [c('h-five-a', Rank.FIVE), c('h-five-b', Rank.FIVE), c('h-nine', Rank.NINE)],
+          2: [c('h-six', Rank.SIX), c('h-ten', Rank.TEN), c('h-jack', Rank.JACK)],
+        };
+      }
+      if (pairAt === 2) {
+        return {
+          1: [c('h-six', Rank.SIX), c('h-nine', Rank.NINE), c('h-jack', Rank.JACK)],
+          2: [c('h-five-a', Rank.FIVE), c('h-five-b', Rank.FIVE), c('h-ten', Rank.TEN)],
+        };
+      }
+      return {
+        1: [c('h-five-a', Rank.FIVE), c('h-nine', Rank.NINE), c('h-jack', Rank.JACK)],
+        2: [c('h-five-b', Rank.FIVE), c('h-six', Rank.SIX), c('h-ten', Rank.TEN)],
+      };
+    }
+
+    /** Seat 0 leads a single five; everyone but seat 3 declines any query and passes until seat 3 must act. */
+    function seatThreeTurn(pairAt: PairHolder, viewerHand: readonly Card[]): { readonly afterLead: GameState; readonly state: GameState } {
+      const start = buildState({
+        phase: 'FREE_LEAD',
+        currentPlayer: 0,
+        hands: { 0: [c('lead-five', Rank.FIVE), c('lead-king', Rank.KING)], ...hiddenHands(pairAt), 3: viewerHand },
+      });
+      const afterLead = dispatch(start, { kind: 'PLAY_CARDS', playerId: 0, cardIds: ['lead-five'] });
+      let state = afterLead;
+      while (state.currentPlayer !== 3) {
+        const playerId = state.currentPlayer!;
+        state = dispatch(state, state.phase === 'GOUCHA_QUERY'
+          ? { kind: 'DECLINE_GOUCHA', playerId }
+          : { kind: 'PASS', playerId });
+      }
+      return { afterLead, state };
+    }
+
+    it('gives seat 3 the same ordinary response turn whichever hidden seat was asked and declined', () => {
+      const viewerHand = [c('v-seven', Rank.SEVEN), c('v-queen', Rank.QUEEN)];
+      const worlds = ([1, 2, null] as const).map((pairAt) => seatThreeTurn(pairAt, viewerHand));
+      expect(worlds.map(({ afterLead }) => [afterLead.phase, afterLead.currentPlayer])).toEqual([
+        ['GOUCHA_QUERY', 1],
+        ['GOUCHA_QUERY', 2],
+        ['RESPONDING', 1],
+      ]);
+      const [first, ...others] = worlds.map(({ state }) => buildObservation(state, 3));
+      expect(first).toMatchObject({ phase: 'RESPONDING', isCurrentPlayer: true });
+      for (const observation of others) expect(observation).toEqual(first);
+    });
+
+    it('gives seat 3 the same gou-cha prompt whether or not an earlier hidden seat declined first', () => {
+      const viewerHand = [c('v-five-a', Rank.FIVE), c('v-five-b', Rank.FIVE), c('v-queen', Rank.QUEEN)];
+      const worlds = ([1, 2, null] as const).map((pairAt) => seatThreeTurn(pairAt, viewerHand));
+      expect(worlds.map(({ afterLead }) => afterLead.currentPlayer)).toEqual([1, 2, 3]);
+      const [first, ...others] = worlds.map(({ state }) => buildObservation(state, 3));
+      expect(first).toMatchObject({ phase: 'GOUCHA_QUERY', legalContext: { gouChaNeed: 'CHA', gouChaRank: Rank.FIVE } });
+      for (const observation of others) expect(observation).toEqual(first);
+    });
   });
 
   it('reports an invalid runtime seat ID clearly', () => {
