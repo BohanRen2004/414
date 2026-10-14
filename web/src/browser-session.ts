@@ -128,6 +128,17 @@ export class BrowserGameSession {
     this.publish();
   }
 
+  /** Replace the selection, e.g. while dragging across the hand; cards not in the hand are dropped. */
+  public setSelection(cardIds: readonly string[]): void {
+    if (this.busy) return;
+    const hand = new Set(this.state.players[0].hand.map((card) => card.id));
+    const next = [...new Set(cardIds)].filter((id) => hand.has(id));
+    if (next.length === this.ui.selectedCardIds.length && next.every((id, index) => id === this.ui.selectedCardIds[index])) return;
+    this.ui = { ...this.ui, selectedCardIds: next, hintIndex: 0 };
+    this.errorCode = null;
+    this.publish();
+  }
+
   public clearSelection(): void {
     if (this.busy) return;
     this.ui = clearSelection(this.ui);

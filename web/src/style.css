@@ -176,7 +176,7 @@ main { width: min(1420px, 100%); min-height: calc(100vh - 76px); margin: auto; p
 .hand-hint { color: #87968d; font-size: 10px; }
 .hand-hint i { padding: 0 4px; color: #5d6b62; font-style: normal; }
 .hand-viewport { width: 100%; min-height: 116px; overflow-x: auto; overflow-y: hidden; padding: 5px 6px 12px; scrollbar-color: #60776a #1a2922; scrollbar-width: thin; }
-.hand-track { min-width: max-content; display: flex; align-items: end; padding: 0 8px 2px 4px; }
+.hand-track { min-width: max-content; display: flex; align-items: end; padding: 0 8px 2px 4px; user-select: none; -webkit-user-select: none; }
 .hand-card { position: relative; z-index: 1; width: clamp(47px, 4.55vw, 62px); height: clamp(70px, 6.7vw, 92px); flex: 0 0 auto; margin-right: clamp(-18px, -1.1vw, -11px); padding: 0; border: 0; border-radius: 7px; background: transparent; cursor: pointer; transition: transform .16s ease, filter .16s ease; }
 .hand-card:hover:not(:disabled) { z-index: 5; transform: translateY(-8px); }
 .hand-card.is-picked { z-index: 4; transform: translateY(-13px); }

@@ -77,7 +77,9 @@ interface WxApi {
   getSystemInfoSync(): WxWindowInfo;
   createCanvas(): WxCanvas;
   onTouchStart(handler: (event: WxTouchEvent) => void): void;
+  onTouchMove(handler: (event: WxTouchEvent) => void): void;
   onTouchEnd(handler: (event: WxTouchEvent) => void): void;
+  onTouchCancel(handler: (event: WxTouchEvent) => void): void;
   showShareMenu?(options: { withShareTicket?: boolean; menus?: string[] }): void;
 }
 

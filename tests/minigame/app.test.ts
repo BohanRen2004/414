@@ -102,6 +102,53 @@ describe('WeChat mini game app', () => {
     expect(app.current.state.players[0].hand).toEqual(first.players[0].hand);
   });
 
+  it('selects several cards with one slide across the hand', async () => {
+    const app = new MiniGameApp(platform(), { animationDelayMs: 0 });
+    await app.perform('start');
+    // Get to an ordinary turn of the human's, where every hand card can be picked.
+    for (let guard = 0; app.current.state.phase === 'GOUCHA_QUERY' || app.current.state.currentPlayer !== 0; guard += 1) {
+      expect(guard).toBeLessThan(10);
+      await app.perform(app.current.state.phase === 'GOUCHA_QUERY' ? 'decline-goucha' : 'new-game');
+      if (app.current.state.phase === 'SETUP') await app.perform('start');
+    }
+    const cards = app.tappable.filter((region): region is Extract<HitRegion, { cardId: string }> => 'cardId' in region);
+    expect(cards.length).toBeGreaterThan(5);
+    const y = cards[0]!.rect.y + cards[0]!.rect.h - 4;
+    const mid = (index: number) => cards[index]!.rect.x + Math.min(cards[index]!.rect.w, 10) / 2;
+
+    // Slide from the 2nd card to the 5th: four cards picked; sliding back to the 3rd drops two.
+    app.touchStart(1, mid(1), y);
+    app.touchMove(1, mid(3), y - 30);
+    app.touchMove(1, mid(4), y + 40);
+    expect(app.current.selectedCardIds).toHaveLength(4);
+    app.touchMove(1, mid(2), y);
+    await app.touchEnd(1, mid(2), y);
+    expect([...app.current.selectedCardIds].sort()).toEqual([cards[1]!.cardId, cards[2]!.cardId].sort());
+
+    // Starting on a picked card clears instead.
+    app.touchStart(2, mid(1), y);
+    app.touchMove(2, mid(0), y);
+    await app.touchEnd(2, mid(0), y);
+    expect(app.current.selectedCardIds).toEqual([cards[2]!.cardId]);
+
+    // A touch that stays on one card toggles it; past the last card selects through to the end.
+    app.touchStart(3, mid(2), y);
+    await app.touchEnd(3, mid(2) + 3, y);
+    expect(app.current.selectedCardIds).toEqual([]);
+    app.touchStart(4, mid(cards.length - 2), y);
+    await app.touchEnd(4, 99_999, y);
+    expect([...app.current.selectedCardIds].sort()).toEqual(cards.slice(-2).map((card) => card.cardId).sort());
+
+    // A slide that starts on a button is not a tap.
+    const clear = app.tappable.find((region) => 'action' in region && region.action === 'clear')!;
+    app.touchStart(5, ...center(clear.rect));
+    await app.touchEnd(5, center(clear.rect)[0] + 40, center(clear.rect)[1]);
+    expect(app.current.selectedCardIds).toHaveLength(2);
+    app.touchStart(6, ...center(clear.rect));
+    await app.touchEnd(6, ...center(clear.rect));
+    expect(app.current.selectedCardIds).toEqual([]);
+  });
+
   it('keeps every drawn coordinate finite on small and large screens', () => {
     for (const [width, height] of [[667, 375], [844, 390], [1280, 720], [2400, 1080]] as const) {
       const host = platform(width, height);

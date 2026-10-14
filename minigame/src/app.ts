@@ -1,5 +1,6 @@
 import { DEFAULT_DECK_COUNT, DeckCount } from '../../client/assets/scripts/core/cards/deck';
 import { RoomResponse } from '../../client/assets/scripts/online/protocol';
+import { dragSelection } from '../../client/assets/scripts/ui/hand-selection';
 import { errorMessage } from '../../client/assets/scripts/ui/labels';
 import { BrowserGameSession, BrowserSessionSnapshot } from '../../web/src/browser-session';
 import { OnlineSession, OnlineSnapshot, RoomTransport } from './online-session';
@@ -37,6 +38,21 @@ export interface AppOptions {
 
 const ROOM_KEY = '414.room';
 const NICKNAME_KEY = '414.nickname';
+/** A touch that moves further than this is a slide, not a tap. */
+const TAP_SLOP = 12;
+
+/** A finger dragging across the hand, selecting (or clearing) every card it passes. */
+interface HandDrag {
+  readonly pointer: number;
+  /** Draggable cards in hand order, with their horizontal strips as laid out when the drag began. */
+  readonly cards: readonly { readonly id: string; readonly left: number; readonly right: number }[];
+  /** Selection when the drag began; cards outside the dragged span keep it. */
+  readonly base: readonly string[];
+  readonly from: number;
+  to: number;
+  moved: boolean;
+}
+
 const SEAT_ACTIONS: Partial<Record<ActionId, 0 | 1 | 2 | 3>> = { 'seat-0': 0, 'seat-1': 1, 'seat-2': 2, 'seat-3': 3 };
 
 /**
@@ -58,6 +74,8 @@ export class MiniGameApp {
   private noticeTimer: unknown = null;
   private clockTimer: unknown = null;
   private joining = false;
+  private drag: HandDrag | null = null;
+  private readonly presses = new Map<number, { readonly x: number; readonly y: number }>();
 
   public constructor(private readonly platform: Platform, private readonly options: AppOptions = {}) {
     this.session = this.newSession(this.freshSeed());
@@ -108,6 +126,66 @@ export class MiniGameApp {
       return;
     }
     await this.perform(region.action);
+  }
+
+  /**
+   * Touch handling: a touch that starts on a hand card drags a selection across the hand (a touch that
+   * never leaves that card toggles it); any other touch is a tap where it ends, unless it slid away.
+   */
+  public touchStart(pointer: number, x: number, y: number): void {
+    const region = hitTest(this.regions, x, y);
+    if (region !== null && 'cardId' in region && this.drag === null) {
+      const cards = this.regions.flatMap((candidate) => ('cardId' in candidate
+        ? [{ id: candidate.cardId, left: candidate.rect.x, right: candidate.rect.x + candidate.rect.w }]
+        : []));
+      const from = cards.findIndex((card) => card.id === region.cardId);
+      const base = this.online !== null ? this.online.selectedCardIds : this.session.selectedCardIds;
+      this.drag = { pointer, cards, base: [...base], from, to: from, moved: false };
+      return;
+    }
+    this.presses.set(pointer, { x, y });
+  }
+
+  public touchMove(pointer: number, x: number, _y: number): void {
+    const drag = this.drag;
+    if (drag === null || drag.pointer !== pointer) return;
+    // Only the horizontal position counts, so a finger drifting off the cards keeps selecting.
+    const first = drag.cards[0];
+    const last = drag.cards[drag.cards.length - 1];
+    if (first === undefined || last === undefined) return;
+    const index = x < first.left ? 0
+      : x >= last.right ? drag.cards.length - 1
+        : Math.max(0, drag.cards.findIndex((card) => x >= card.left && x < card.right));
+    if (index === drag.to) return;
+    drag.to = index;
+    drag.moved = true;
+    const selection = dragSelection(drag.base, drag.cards.map((card) => card.id), drag.from, index);
+    if (this.online !== null) this.online.setSelection(selection);
+    else this.session.setSelection(selection);
+  }
+
+  public async touchEnd(pointer: number, x: number, y: number): Promise<void> {
+    const drag = this.drag;
+    if (drag !== null && drag.pointer === pointer) {
+      this.touchMove(pointer, x, y);
+      this.drag = null;
+      const card = drag.cards[drag.from];
+      if (!drag.moved && card !== undefined) {
+        if (this.online !== null) this.online.toggleCard(card.id);
+        else this.session.toggleCard(card.id);
+      }
+      return;
+    }
+    const start = this.presses.get(pointer);
+    this.presses.delete(pointer);
+    if (start === undefined || Math.hypot(x - start.x, y - start.y) > TAP_SLOP) return;
+    await this.tap(x, y);
+  }
+
+  /** The system took the touch away (e.g. a call came in): keep what was selected so far. */
+  public touchCancel(pointer: number): void {
+    if (this.drag?.pointer === pointer) this.drag = null;
+    this.presses.delete(pointer);
   }
 
   public async perform(action: ActionId): Promise<void> {

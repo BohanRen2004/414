@@ -63,18 +63,18 @@ const app = new MiniGameApp({
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 });
 
-// A tap is a touch that ends close to where it started, so a slide across the hand is not a tap.
-const starts = new Map<number, { x: number; y: number }>();
+// Touches go to the app: a slide across the hand selects cards, a short touch elsewhere is a tap.
 wx.onTouchStart((event) => {
-  for (const touch of event.changedTouches) starts.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+  for (const touch of event.changedTouches) app.touchStart(touch.identifier, touch.clientX, touch.clientY);
+});
+wx.onTouchMove((event) => {
+  for (const touch of event.changedTouches) app.touchMove(touch.identifier, touch.clientX, touch.clientY);
 });
 wx.onTouchEnd((event) => {
-  for (const touch of event.changedTouches) {
-    const start = starts.get(touch.identifier);
-    starts.delete(touch.identifier);
-    if (start !== undefined && Math.hypot(touch.clientX - start.x, touch.clientY - start.y) > 12) continue;
-    void app.tap(touch.clientX, touch.clientY);
-  }
+  for (const touch of event.changedTouches) void app.touchEnd(touch.identifier, touch.clientX, touch.clientY);
+});
+wx.onTouchCancel((event) => {
+  for (const touch of event.changedTouches) app.touchCancel(touch.identifier);
 });
 
 wx.showShareMenu?.({ withShareTicket: false, menus: ['shareAppMessage'] });

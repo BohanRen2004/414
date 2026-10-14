@@ -195,6 +195,17 @@ export class OnlineSession {
     this.publish();
   }
 
+  /** Replace the selection, e.g. while dragging across the hand; cards not in the hand are dropped. */
+  public setSelection(cardIds: readonly string[]): void {
+    if (this.isBusy || this.room.mySeat === null) return;
+    const hand = new Set(this.state.players[this.room.mySeat].hand.map((card) => card.id));
+    const next = [...new Set(cardIds)].filter((id) => hand.has(id));
+    if (next.length === this.ui.selectedCardIds.length && next.every((id, index) => id === this.ui.selectedCardIds[index])) return;
+    this.ui = { ...this.ui, selectedCardIds: next, hintIndex: 0 };
+    this.errorCode = null;
+    this.publish();
+  }
+
   public clearSelection(): void {
     if (this.isBusy) return;
     this.ui = clearSelection(this.ui);

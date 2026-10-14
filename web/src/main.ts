@@ -4,6 +4,7 @@ import { DECK_OPTIONS, deckOption } from '../../client/assets/scripts/ui/deck-op
 import {
   SUIT_GLYPH as suitGlyph, HISTORY_ACTION_LABEL, errorMessage, formatSeed, isRedCard, phaseMessage as tablePhaseMessage, sortCardsForDisplay, playerName, rankLabel,
 } from '../../client/assets/scripts/ui/labels';
+import { dragSelection } from '../../client/assets/scripts/ui/hand-selection';
 import { BrowserGameSession, BrowserSessionSnapshot } from './browser-session';
 import './style.css';
 
@@ -265,7 +266,7 @@ function render(snapshot: BrowserSessionSnapshot): void {
         ${renderSeat('right', snapshot)}
         <section class="hand-zone" aria-label="玩家手牌">
           <div class="hand-header"><div><span class="eyebrow">YOUR HAND</span><h3>你的手牌 <span>${snapshot.viewModel.seats.bottom.remaining}</span></h3></div>
-            <div class="hand-hint">选中牌面加入组合 <i>·</i> 同点数牌会自动对齐</div></div>
+            <div class="hand-hint">点牌选择 <i>·</i> 按住拖过多张一次选中</div></div>
           <div class="hand-viewport">${renderHand(snapshot)}</div>
           ${renderControls(snapshot)}
         </section>
@@ -325,6 +326,47 @@ root.addEventListener('submit', async (event) => {
   if (!started) setNotice(`无法开始游戏：${session.lastErrorCode ?? '未知错误'}`);
 });
 
+/**
+ * Dragging the mouse (or a pen) across the hand selects every card it passes; starting on a selected card
+ * clears them instead. Touch keeps scrolling the hand, which is wider than a phone screen.
+ */
+let handDrag: { pointer: number; ids: string[]; base: string[]; from: number; to: number; moved: boolean } | null = null;
+let suppressCardClickUntil = 0;
+
+function handCardAt(x: number, y: number): HTMLElement | null {
+  return document.elementFromPoint(x, y)?.closest<HTMLElement>('.hand-card[data-card-id]') ?? null;
+}
+
+root.addEventListener('pointerdown', (event) => {
+  if (event.pointerType === 'touch' || event.button !== 0 || !(event.target instanceof Element)) return;
+  const card = event.target.closest<HTMLElement>('.hand-card[data-card-id]');
+  if (card === null || card.hasAttribute('disabled')) return;
+  const ids = [...root.querySelectorAll<HTMLElement>('.hand-card[data-card-id]')].map((element) => element.dataset.cardId ?? '');
+  const from = ids.indexOf(card.dataset.cardId ?? '');
+  if (from < 0) return;
+  event.preventDefault();
+  handDrag = { pointer: event.pointerId, ids, base: [...session.selectedCardIds], from, to: from, moved: false };
+});
+
+window.addEventListener('pointermove', (event) => {
+  const drag = handDrag;
+  if (drag === null || drag.pointer !== event.pointerId) return;
+  const index = drag.ids.indexOf(handCardAt(event.clientX, event.clientY)?.dataset.cardId ?? '');
+  if (index < 0 || index === drag.to) return;
+  drag.to = index;
+  drag.moved = true;
+  session.setSelection(dragSelection(drag.base, drag.ids, drag.from, index));
+});
+
+function endHandDrag(event: PointerEvent): void {
+  if (handDrag === null || handDrag.pointer !== event.pointerId) return;
+  // The click that follows a drag must not toggle the card it ended on.
+  if (handDrag.moved) suppressCardClickUntil = performance.now() + 400;
+  handDrag = null;
+}
+window.addEventListener('pointerup', endHandDrag);
+window.addEventListener('pointercancel', endHandDrag);
+
 root.addEventListener('click', async (event) => {
   const target = event.target;
   if (!(target instanceof Element)) return;
@@ -332,6 +374,7 @@ root.addEventListener('click', async (event) => {
   if (button === null || button.hasAttribute('disabled')) return;
   const action = button.dataset.action;
   if (action === 'toggle-card') {
+    if (performance.now() < suppressCardClickUntil) return;
     const cardId = button.dataset.cardId;
     if (cardId !== undefined) session.toggleCard(cardId);
     return;
