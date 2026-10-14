@@ -57,23 +57,29 @@ export function formatSeed(seed: number): string {
 
 export const HISTORY_ACTION_LABEL = { PLAY_CARDS: '出牌', PASS: '不出', CHA: '岔', GOU: '勾' } as const;
 
-/** The status line under the table for the human at seat 0. */
-export function phaseMessage(state: GameState, viewModel: TableViewModel, isBusy: boolean): string {
+/** The status line under the table for the human (seat 0 offline, their own seat online). */
+export function phaseMessage(
+  state: GameState,
+  viewModel: TableViewModel,
+  isBusy: boolean,
+  name: (playerId: PlayerId) => string = playerName,
+  viewerId: PlayerId = 0,
+): string {
   if (state.phase === 'ROUND_RESULT') return '本局结束';
   // A CHA/GOU just happened. Nobody is highlighted: whether anyone is being asked to continue is private.
   const pending = viewModel.center.pending;
   if (pending !== null) {
-    return `${playerName(pending.playerId)}${pending.addition === 'CHA' ? '岔' : '勾'} ${rankLabel(pending.rank)}，看有没有人接`;
+    return `${name(pending.playerId)}${pending.addition === 'CHA' ? '岔' : '勾'} ${rankLabel(pending.rank)}，看有没有人接`;
   }
-  if (state.phase === 'GOUCHA_QUERY' && state.currentPlayer === 0) {
+  if (state.phase === 'GOUCHA_QUERY' && state.currentPlayer === viewerId) {
     const addition = state.trick?.gouCha?.nextAddition;
     return addition === 'CHA' ? '轮到你岔：选同点数的一对牌' : '轮到你勾：选同点数的一张牌';
   }
   // While earlier moves are still being shown, the human's turn is not open yet (it may still be pre-empted by a 岔).
-  if (state.currentPlayer === 0 && isBusy && (state.phase === 'FREE_LEAD' || state.phase === 'RESPONDING')) return '等待其他玩家…';
-  if (state.currentPlayer === 0 && state.phase === 'FREE_LEAD') return '轮到你自由出牌';
-  if (state.currentPlayer === 0 && state.phase === 'RESPONDING') return '轮到你压牌，或选择不出';
-  return state.currentPlayer === null ? '正在准备牌局' : `${playerName(state.currentPlayer)}思考中`;
+  if (state.currentPlayer === viewerId && isBusy && (state.phase === 'FREE_LEAD' || state.phase === 'RESPONDING')) return '等待其他玩家…';
+  if (state.currentPlayer === viewerId && state.phase === 'FREE_LEAD') return '轮到你自由出牌';
+  if (state.currentPlayer === viewerId && state.phase === 'RESPONDING') return '轮到你压牌，或选择不出';
+  return state.currentPlayer === null ? '正在准备牌局' : `${name(state.currentPlayer)}思考中`;
 }
 
 const ERROR_MESSAGES: Readonly<Record<string, string>> = {
@@ -89,6 +95,24 @@ const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   'rule.does_not_beat_current_play': '这组牌压不过桌面牌。',
   'rule.card_not_owned': '选择的牌已不在你的手牌中。',
   'INVALID_GOUCHA_SELECTION': '请选择符合岔/勾要求的牌。',
+  // Rules core reasons, as the online server reports them.
+  'NOT_CURRENT_PLAYER': '现在还没有轮到你。',
+  'WRONG_PHASE': '当前阶段不能执行这个动作。',
+  'DOES_NOT_BEAT_CURRENT_PLAY': '这组牌压不过桌面牌。',
+  'PASS_NOT_ALLOWED': '现在不能不出。',
+  'CARD_NOT_OWNED': '选择的牌已不在你的手牌中。',
+  'INVALID_PATTERN': '这组牌不符合已确认的牌型。',
+  // Room errors.
+  'NETWORK': '网络不太好，请再试一次。',
+  'ROOM_NOT_FOUND': '房间不存在或已经关闭。',
+  'ROOM_FULL': '房间已满。',
+  'GAME_IN_PROGRESS': '这局还在进行，结束后再来。',
+  'NOT_IN_ROOM': '你已不在这个房间。',
+  'NOT_HOST': '只有房主可以这样做。',
+  'SEAT_TAKEN': '这个座位已经有人了。',
+  'WRONG_STATUS': '现在不能这样做。',
+  'BUSY': '服务器忙，请再试一次。',
+  'BAD_REQUEST': '请求无效。',
 };
 
 /** Human-readable text for a selection or rule error key; empty when there is no error. */

@@ -11,7 +11,17 @@
     "urlCheck": true
   },
   "packOptions": {
-    "ignore": [{ "type": "folder", "value": "src" }],
+    "ignore": [
+      {
+        "type": "folder",
+        "value": "src"
+      },
+      {
+        "type": "folder",
+        "value": "cloudfunctions"
+      }
+    ],
     "include": []
-  }
+  },
+  "cloudfunctionRoot": "cloudfunctions/"
 }

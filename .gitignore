@@ -12,3 +12,4 @@ client/profiles/
 coverage/
 *.log
 minigame/game.js
+minigame/cloudfunctions/room/index.js

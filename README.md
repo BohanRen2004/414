@@ -29,7 +29,7 @@ npm run preview:web
 
 ## 微信小游戏
 
-`minigame/` 是微信小游戏版本（Canvas 绘制，规则和 AI 与网页版共用）。运行 `npm run build:minigame` 生成 `minigame/game.js`，再用微信开发者工具导入 `minigame` 目录，详见 [minigame/README.md](minigame/README.md)。
+`minigame/` 是微信小游戏版本（Canvas 绘制，规则和 AI 与网页版共用）：可以单人和 AI 练习，也可以开房间邀请微信好友联机（微信云开发，空位 AI 补）。运行 `npm run build:minigame` 生成 `minigame/game.js` 和云函数 `minigame/cloudfunctions/room/index.js`，再用微信开发者工具导入 `minigame` 目录，详见 [minigame/README.md](minigame/README.md)。联机的服务端逻辑在 `server/`（纯 TypeScript，测试里用内存数据库跑）。
 
 ## 架构
 

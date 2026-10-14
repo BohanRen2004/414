@@ -1,7 +1,7 @@
 import { Card, Rank } from '../../client/assets/scripts/core/cards/card';
 import { DECK_OPTIONS } from '../../client/assets/scripts/ui/deck-options';
 import { SUIT_GLYPH, isRedCard, rankLabel } from '../../client/assets/scripts/ui/labels';
-import { ActionId, ButtonScreen, SeatScreen, TableScreen } from './screen';
+import { ActionId, ButtonScreen, LobbyScreen, SeatScreen, TableScreen } from './screen';
 
 /** The subset of the 2D canvas API used here; WeChat's canvas context and the browser's both provide it. */
 export interface Canvas2D {
@@ -174,19 +174,22 @@ function drawSeat(ctx: Canvas2D, seat: SeatScreen, center: { x: number; y: numbe
   ctx.lineWidth = seat.active ? 2.5 : 1;
   ctx.strokeStyle = seat.active ? COLOR.mint : COLOR.panelEdge;
   ctx.stroke();
-  text(ctx, seat.position === 'top' ? '搭' : 'AI', center.x, center.y, 11 * scale, seat.team === 0 ? COLOR.blue : COLOR.gold, 'center', 700);
+  text(ctx, seat.badge, center.x, center.y, 11 * scale, seat.team === 0 ? COLOR.blue : COLOR.gold, 'center', 700);
   const tags = [`${seat.remaining} 张`];
   if (seat.report !== null) tags.push(`报${seat.report}`);
   if (seat.place !== null) tags.push(`第${seat.place}`);
   const tagColor = seat.report !== null ? COLOR.red : COLOR.muted;
   if (seat.position === 'top') {
     // The partner sits in a slim row above the table: avatar, then name and counts to its right.
-    text(ctx, seat.name, center.x + radius + 8 * scale, center.y, 12 * scale, COLOR.ink, 'left', 600);
-    text(ctx, tags.join(' · '), center.x + radius + 44 * scale, center.y, 11 * scale, tagColor, 'left');
+    const name = fit(ctx, seat.name, 12 * scale, 90 * scale, 600);
+    ctx.font = font(12 * scale, 600);
+    const nameWidth = Math.max(32 * scale, ctx.measureText(name).width);
+    text(ctx, name, center.x + radius + 8 * scale, center.y, 12 * scale, COLOR.ink, 'left', 600);
+    text(ctx, tags.join(' · '), center.x + radius + 14 * scale + nameWidth, center.y, 11 * scale, tagColor, 'left');
     return;
   }
   const below = center.y + radius + 10 * scale;
-  text(ctx, seat.name, center.x, below, 12 * scale, COLOR.ink, 'center', 600);
+  text(ctx, fit(ctx, seat.name, 12 * scale, 84 * scale, 600), center.x, below, 12 * scale, COLOR.ink, 'center', 600);
   text(ctx, tags.join(' · '), center.x, below + 15 * scale, 11 * scale, tagColor, 'center');
 }
 
@@ -207,7 +210,7 @@ function drawStart(ctx: Canvas2D, view: Viewport, screen: TableScreen, regions: 
   panel(ctx, r);
   const pad = 22;
   text(ctx, '4A4', r.x + pad, r.y + 34, 30, COLOR.ink, 'left', 700);
-  text(ctx, '四人两队 · 和三位 AI 打一局', r.x + pad + 72, r.y + 36, 13, COLOR.muted);
+  text(ctx, start.online ? '四人两队 · 单人练习或和好友联机' : '四人两队 · 和三位 AI 打一局', r.x + pad + 72, r.y + 36, 13, COLOR.muted);
   const optionY = r.y + 70;
   const optionW = (w - pad * 2 - 10) / 2;
   DECK_OPTIONS.forEach((option, index) => {
@@ -224,11 +227,23 @@ function drawStart(ctx: Canvas2D, view: Viewport, screen: TableScreen, regions: 
     regions.push({ rect: box, action: option.deckCount === 1 ? 'deck-1' : 'deck-2' });
   });
   const buttonH = 44;
-  drawButton(ctx, { id: 'start', label: '开始游戏', enabled: true, style: 'primary' },
-    { x: r.x + pad, y: r.y + h - pad - buttonH, w: w - pad * 2 - 56, h: buttonH }, regions);
+  const buttonY = r.y + h - pad - buttonH;
+  const rowButtons: ButtonScreen[] = [
+    { id: 'start', label: start.online ? '单人练习' : '开始游戏', enabled: true, style: 'primary' },
+    ...(start.online ? [
+      { id: 'create-room', label: '创建房间', enabled: true, style: 'secondary' } as const,
+      { id: 'join-room', label: '加入房间', enabled: true, style: 'secondary' } as const,
+    ] : []),
+  ];
+  const helpW = 48;
+  const gap = 8;
+  const rowW = (w - pad * 2 - helpW - gap * rowButtons.length) / rowButtons.length;
+  rowButtons.forEach((button, index) => drawButton(ctx, button,
+    { x: r.x + pad + index * (rowW + gap), y: buttonY, w: rowW, h: buttonH }, regions));
   drawButton(ctx, { id: 'help', label: '规则', enabled: true, style: 'quiet' },
-    { x: r.x + w - pad - 48, y: r.y + h - pad - buttonH, w: 48, h: buttonH }, regions);
-  text(ctx, fit(ctx, `${start.summary} · 持红桃 3 的玩家先出`, 11, w - pad * 2), r.x + pad, optionY + 86, 11, COLOR.muted);
+    { x: r.x + w - pad - helpW, y: buttonY, w: helpW, h: buttonH }, regions);
+  const hint = start.online ? `${start.summary} · 单人练习和三位 AI 打；房间可邀请微信好友` : `${start.summary} · 持红桃 3 的玩家先出`;
+  text(ctx, fit(ctx, hint, 11, w - pad * 2), r.x + pad, optionY + 86, 11, COLOR.muted);
 }
 
 function drawResult(ctx: Canvas2D, view: Viewport, screen: TableScreen, regions: HitRegion[]): void {
@@ -248,11 +263,11 @@ function drawResult(ctx: Canvas2D, view: Viewport, screen: TableScreen, regions:
     text(ctx, place.name, r.x + 90, y, 14, COLOR.ink, 'left', 600);
     text(ctx, place.winning ? '胜方' : '', r.x + w - 22, y, 12, COLOR.mint, 'right');
   });
-  const buttonW = (w - 54) / 2;
-  drawButton(ctx, { id: 'replay', label: '同种子重开', enabled: true, style: 'secondary' },
-    { x: r.x + 22, y: r.y + h - 62, w: buttonW, h: 42 }, regions);
-  drawButton(ctx, { id: 'new-game', label: '新开一局', enabled: true, style: 'primary' },
-    { x: r.x + 32 + buttonW, y: r.y + h - 62, w: buttonW, h: 42 }, regions);
+  if (result.note) text(ctx, fit(ctx, result.note, 12, w - 44), r.x + 22, r.y + h - 76, 12, COLOR.muted);
+  const count = Math.max(1, result.buttons.length);
+  const buttonW = (w - 44 - (count - 1) * 10) / count;
+  result.buttons.forEach((button, index) => drawButton(ctx, button,
+    { x: r.x + 22 + index * (buttonW + 10), y: r.y + h - 62, w: buttonW, h: 42 }, regions));
 }
 
 const HELP_TEXT = [
@@ -294,11 +309,14 @@ export function drawFrame(ctx: Canvas2D, view: Viewport, screen: TableScreen, ov
   const barH = 26 * scale;
   text(ctx, screen.topLabel, left, top + barH / 2, 13 * scale, COLOR.ink, 'left', 700);
   const smallButtonW = 52 * scale;
-  drawButton(ctx, { id: 'help', label: '规则', enabled: true, style: 'quiet' },
-    { x: right - smallButtonW * 2 - 6, y: top, w: smallButtonW, h: barH }, regions);
-  drawButton(ctx, { id: 'new-game', label: '新局', enabled: screen.start === null, style: 'quiet' },
-    { x: right - smallButtonW, y: top, w: smallButtonW, h: barH }, regions);
-  text(ctx, screen.seedLabel, right - smallButtonW * 2 - 14, top + barH / 2, 11 * scale, COLOR.muted, 'right');
+  const topButtons = screen.topButtons;
+  topButtons.forEach((button, index) => {
+    const w = button.label.length > 2 ? smallButtonW * 1.4 : smallButtonW;
+    const x = right - topButtons.slice(index).reduce((sum, next) => sum + (next.label.length > 2 ? smallButtonW * 1.4 : smallButtonW) + 6, 0) + 6;
+    drawButton(ctx, button, { x, y: top, w, h: barH }, regions);
+  });
+  const topButtonsW = topButtons.reduce((sum, next) => sum + (next.label.length > 2 ? smallButtonW * 1.4 : smallButtonW) + 6, 0);
+  text(ctx, screen.seedLabel, right - topButtonsW - 8, top + barH / 2, 11 * scale, COLOR.muted, 'right');
 
   // Hand along the bottom.
   const cardH = Math.min(96, Math.max(54, view.height * 0.23));
@@ -398,6 +416,83 @@ export function drawFrame(ctx: Canvas2D, view: Viewport, screen: TableScreen, ov
   } else if (screen.result !== null) {
     regions.length = 0;
     drawResult(ctx, view, screen, regions);
+  }
+  if (overlay.help) {
+    regions.length = 0;
+    drawHelp(ctx, view, regions);
+  }
+  return regions;
+}
+
+/** The online room before a game: two team columns of seats, the version, and invite/start buttons. */
+export function drawLobbyFrame(ctx: Canvas2D, view: Viewport, lobby: LobbyScreen, overlay: Overlay): HitRegion[] {
+  const regions: HitRegion[] = [];
+  ctx.fillStyle = COLOR.bg;
+  ctx.fillRect(0, 0, view.width, view.height);
+  const w = Math.min(560, view.width - view.insetLeft - view.insetRight - 24);
+  const h = Math.min(360, view.height - view.insetTop - view.insetBottom - 12);
+  const r = { x: (view.width - w) / 2, y: view.insetTop + (view.height - view.insetTop - view.insetBottom - h) / 2, w, h };
+  panel(ctx, r);
+  const pad = 18;
+  text(ctx, lobby.title, r.x + pad, r.y + 26, 22, COLOR.ink, 'left', 700);
+  text(ctx, fit(ctx, lobby.subtitle, 12, w - pad * 2 - 170), r.x + pad + 150, r.y + 27, 12, COLOR.muted);
+  drawButton(ctx, { id: 'help', label: '规则', enabled: true, style: 'quiet' }, { x: r.x + w - pad - 48, y: r.y + 12, w: 48, h: 28 }, regions);
+
+  // Version toggle (the host may change it).
+  const toggleY = r.y + 50;
+  const toggleW = 76;
+  DECK_OPTIONS.forEach((option, index) => {
+    const box = { x: r.x + pad + index * (toggleW + 8), y: toggleY, w: toggleW, h: 28 };
+    const chosen = option.deckCount === lobby.deckCount;
+    roundRect(ctx, box, 7);
+    ctx.fillStyle = chosen ? '#1f3a30' : COLOR.bg;
+    ctx.fill();
+    ctx.lineWidth = chosen ? 2 : 1;
+    ctx.strokeStyle = chosen ? COLOR.mint : COLOR.panelEdge;
+    ctx.stroke();
+    text(ctx, option.label, box.x + box.w / 2, box.y + 14, 13, chosen ? COLOR.ink : COLOR.muted, 'center', 600);
+    if (lobby.deckEditable && !chosen) regions.push({ rect: box, action: option.deckCount === 1 ? 'deck-1' : 'deck-2' });
+  });
+  text(ctx, fit(ctx, lobby.note, 11, w - pad * 2 - toggleW * 2 - 24), r.x + pad + toggleW * 2 + 20, toggleY + 14, 11, COLOR.muted);
+
+  // Seats: team of seats 1 and 3 on the left, seats 2 and 4 on the right.
+  const gridTop = toggleY + 40;
+  const buttonsH = 40;
+  const gridH = r.y + h - pad - buttonsH - 26 - gridTop;
+  const colW = (w - pad * 2 - 12) / 2;
+  const slotH = (gridH - 10) / 2;
+  for (const seat of lobby.seats) {
+    const column = seat.team;
+    const row = seat.seat < 2 ? 0 : 1;
+    const box = { x: r.x + pad + column * (colW + 12), y: gridTop + row * (slotH + 10), w: colW, h: slotH };
+    roundRect(ctx, box, 9);
+    ctx.fillStyle = seat.isMe ? '#1f3a30' : seat.empty ? COLOR.bg : '#1d2a26';
+    ctx.fill();
+    ctx.lineWidth = seat.isMe ? 2 : 1;
+    ctx.strokeStyle = seat.isMe ? COLOR.mint : COLOR.panelEdge;
+    ctx.stroke();
+    const teamColor = seat.team === 0 ? COLOR.blue : COLOR.gold;
+    text(ctx, `${seat.seat + 1} 号`, box.x + 12, box.y + slotH / 2 - 8, 11, teamColor, 'left', 700);
+    text(ctx, fit(ctx, seat.label, 15, box.w - 70, 600), box.x + 52, box.y + slotH / 2 - 8, 15, seat.empty ? COLOR.muted : COLOR.ink, 'left', 600);
+    if (seat.detail) text(ctx, fit(ctx, seat.detail, 11, box.w - 64), box.x + 52, box.y + slotH / 2 + 12, 11, COLOR.muted);
+    if (seat.action !== null) regions.push({ rect: box, action: seat.action });
+  }
+  text(ctx, '蓝队', r.x + pad + colW - 8, gridTop - 8, 10, COLOR.blue, 'right');
+  text(ctx, '金队', r.x + pad + colW * 2 + 4, gridTop - 8, 10, COLOR.gold, 'right');
+
+  if (lobby.error) text(ctx, fit(ctx, lobby.error, 12, w - pad * 2), r.x + pad, r.y + h - pad - buttonsH - 12, 12, COLOR.red);
+  const count = lobby.buttons.length;
+  const bw = Math.min(150, (w - pad * 2 - (count - 1) * 10) / count);
+  lobby.buttons.forEach((button, index) => drawButton(ctx, button,
+    { x: r.x + w - pad - (count - index) * (bw + 10) + 10, y: r.y + h - pad - buttonsH, w: bw, h: buttonsH }, regions));
+
+  if (overlay.notice) {
+    const nw = Math.min(320, view.width - 40);
+    const nr = { x: (view.width - nw) / 2, y: r.y + 8, w: nw, h: 30 };
+    roundRect(ctx, nr, 15);
+    ctx.fillStyle = '#2a3b35';
+    ctx.fill();
+    text(ctx, fit(ctx, overlay.notice, 12, nw - 20), view.width / 2, nr.y + 15, 12, COLOR.ink, 'center');
   }
   if (overlay.help) {
     regions.length = 0;
