@@ -48,6 +48,14 @@ function appendAction(
   };
 }
 
+/** The trick winner leads again; a finished winner hands the lead to their partner (借光), else clockwise. */
+export function nextLeadPlayer(players: readonly PlayerState[], holderId: PlayerId): PlayerId | null {
+  if (active(players[holderId]!)) return holderId;
+  const partnerId = ((holderId + 2) % 4) as PlayerId;
+  if (active(players[partnerId]!)) return partnerId;
+  return nextActivePlayer(players, holderId);
+}
+
 function findNextResponder(
   players: readonly PlayerState[],
   holderId: PlayerId,
@@ -194,7 +202,7 @@ export function passTurn(state: GameState, action: Extract<GameAction, { kind: '
   );
 
   if (allRespondersPassed) {
-    const leadPlayer = nextActivePlayer(state.players, state.trick.holderId);
+    const leadPlayer = nextLeadPlayer(state.players, state.trick.holderId);
     if (leadPlayer === null) {
       return { ok: false, error: { code: 'GAME_ALREADY_FINISHED', messageKey: 'rule.game_already_finished', context: {} } };
     }

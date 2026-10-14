@@ -1,10 +1,13 @@
 import { GamePhase } from '../state/game-state';
 import { PlayerId } from '../cards/card';
+import type { DeckCount } from '../cards/deck';
 
 export interface DiagnosticEntry {
   readonly level: 'INFO' | 'DEBUG' | 'WARN' | 'ERROR';
   readonly seed: number | null;
   readonly rulesVersion: string;
+  /** Game version: with the seed and rules version it identifies the deal; null before START_GAME. */
+  readonly deckCount: DeckCount | null;
   readonly actionNumber: number;
   readonly phase: GamePhase;
   readonly playerId?: PlayerId;
@@ -21,6 +24,7 @@ export function formatDiagnosticLog(entries: readonly DiagnosticEntry[]): string
     const record: Record<string, unknown> = {
       seed: entry.seed,
       rulesVersion: entry.rulesVersion,
+      deckCount: entry.deckCount,
       actionNumber: entry.actionNumber,
       phase: entry.phase,
     };

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
+import { DeckCount, dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
 import { Rank, Suit } from '../../client/assets/scripts/core/cards/card';
+import { firstPlayerCandidates } from '../../client/assets/scripts/core/rules/first-player';
 import { CardGroup } from '../../client/assets/scripts/core/patterns/play-pattern';
-import { deriveSeed } from '../../client/assets/scripts/core/random/prng';
 import { applyAction, createSetupState } from '../../client/assets/scripts/core/rules/reducer';
 import { GouChaAddition } from '../../client/assets/scripts/core/state/game-state';
 import { c } from '../helpers/cards';
@@ -21,14 +21,11 @@ function chainFixture(
   basePlay: CardGroup,
   additions: readonly GouChaAddition[],
   rank: Rank = Rank.FIVE,
-  aggregateCardIds: readonly string[] = [...basePlay.cardIds, ...additions.flatMap((addition) => addition.cardIds)],
 ) {
   return {
     rank,
     basePlay,
     additions,
-    aggregateCardIds,
-    aggregatePattern: { kind: 'N_OF_KIND_BOMB' as const, rank, count: aggregateCardIds.length },
     holderId: 1 as const,
     nextAddition: 'GOU' as const,
     queryCursor: 2 as const,
@@ -42,7 +39,9 @@ describe('start game', () => {
     const setupSnapshot = structuredClone(setup);
     const started = expectSuccess(applyAction(setup, { kind: 'START_GAME', seed: 414 }));
 
+    expect(setup.deckCount).toBeNull();
     expect(started.state.phase).toBe('FREE_LEAD');
+    expect(started.state.deckCount).toBe(2);
     expect(started.state.players.map((player) => player.hand.length)).toEqual([27, 27, 27, 27]);
     expect(started.state.players.map((player) => player.teamId)).toEqual([0, 1, 0, 1]);
     expect(started.state.players.map((player) => player.controlType)).toEqual(['HUMAN', 'BASIC_AI', 'BASIC_AI', 'BASIC_AI']);
@@ -50,10 +49,7 @@ describe('start game', () => {
     expect(started.state.currentPlayer).toBe(started.state.firstPlayer);
     expect(started.state.actionNumber).toBe(1);
     expect(started.state.rootSeed).toBe(414);
-    expect(started.state.randomState).toEqual({
-      deal: dealFourPlayers(414).dealStateAfterSetup,
-      ai: deriveSeed(414, 'AI'),
-    });
+    expect(started.state.randomState).toEqual({ deal: dealFourPlayers(414).dealStateAfterSetup });
     expect(started.events).toEqual([
       { kind: 'GAME_STARTED' },
       { kind: 'CARDS_DEALT' },
@@ -63,6 +59,61 @@ describe('start game', () => {
     const again = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed: 414 }));
     expect(again.state).toEqual(started.state);
     expect(setup).toEqual(setupSnapshot);
+    // Omitting the deck count is the two-deck game, so existing callers keep their games.
+    const explicit = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed: 414, deckCount: 2 }));
+    expect(explicit.state).toEqual(started.state);
+    expect(started.state.firstPlayer).toBe(dealFourPlayers(414).firstPlayer);
+  });
+
+  it('starts a one-deck game: 54 cards, 14/14/13/13, the heart-three holder leads, same seed same game', () => {
+    for (const seed of [414, 0, 1, 2026, 0xffff_ffff]) {
+      const started = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed, deckCount: 1 }));
+      const deal = dealFourPlayers(seed, 1);
+      const state = started.state;
+      expect(state.deckCount).toBe(1);
+      expect(state.phase).toBe('FREE_LEAD');
+      expect(state.rootSeed).toBe(seed);
+      expect(state.players.map((player) => player.hand)).toEqual(deal.hands);
+      expect([...state.players.map((player) => player.hand.length)].sort()).toEqual([13, 13, 14, 14]);
+      const ids = state.players.flatMap((player) => player.hand.map((card) => card.id));
+      expect(new Set(ids).size).toBe(54);
+      const heartThree = state.players.findIndex((player) =>
+        player.hand.some((card) => card.rank === Rank.THREE && card.suit === Suit.HEART));
+      expect(state.firstPlayer).toBe(heartThree);
+      expect(state.currentPlayer).toBe(heartThree);
+      expect(state.randomState).toEqual({ deal: deal.dealStateAfterSetup });
+      expect(started.events).toEqual([
+        { kind: 'GAME_STARTED' },
+        { kind: 'CARDS_DEALT' },
+        { kind: 'TURN_CHANGED', playerId: heartThree },
+      ]);
+      const again = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed, deckCount: 1 }));
+      expect(again.state).toEqual(state);
+    }
+  });
+
+  it('rejects an unknown deck count and stays in setup', () => {
+    const setup = createSetupState();
+    for (const deckCount of [0, 3, 1.5]) {
+      expect(errorCode(applyAction(setup, { kind: 'START_GAME', seed: 414, deckCount: deckCount as DeckCount })))
+        .toBe('INVALID_DECK_COUNT');
+    }
+    expect(setup).toEqual(createSetupState());
+  });
+
+  it('lets the first player lead any legal pattern, not only one holding a three', () => {
+    for (const deckCount of [1, 2] as const) {
+      for (const seed of [414, 7, 99]) {
+        const state = expectSuccess(applyAction(createSetupState(), { kind: 'START_GAME', seed, deckCount })).state;
+        const leader = state.currentPlayer!;
+        expect(firstPlayerCandidates(state.players.map((player) => player.hand))).toContain(leader);
+        const notThree = state.players[leader].hand.find((card) => card.rank !== Rank.THREE)!;
+        const led = expectSuccess(applyAction(state, { kind: 'PLAY_CARDS', playerId: leader, cardIds: [notThree.id] }));
+        expect(led.state.publicHistory).toEqual([
+          { actionNumber: 1, playerId: leader, kind: 'PLAY_CARDS', cardIds: [notThree.id] },
+        ]);
+      }
+    }
   });
 
   it('rejects restarting a live game and leaves its state untouched', () => {
@@ -136,11 +187,11 @@ describe('state fixture card identity', () => {
       .toThrow(/reuses table card ID/);
   });
 
-  it('rejects reusing a regular 4A4 alias as a heart 4A4 in the aggregate mirror', () => {
+  it('rejects reusing a regular 4A4 alias as a heart 4A4 in the current-play mirror of a chain base', () => {
     const cardIds = ['four-a', 'four-b', 'ace'];
     const regular = group(cardIds, { kind: 'FOUR_A_FOUR', allHearts: false });
     const heart = group(cardIds, { kind: 'FOUR_A_FOUR', allHearts: true }, 1);
-    const gouCha = chainFixture(regular, [], Rank.FOUR, cardIds);
+    const gouCha = chainFixture(regular, [], Rank.FOUR);
     expect(() => buildState({
       phase: 'GOUCHA_QUERY',
       currentPlayer: 2,

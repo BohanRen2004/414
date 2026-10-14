@@ -1,25 +1,25 @@
-import { Card, Rank, Suit } from '../../client/assets/scripts/core/cards/card';
-import { createDoubleDeck } from '../../client/assets/scripts/core/cards/deck';
-import { GameState } from '../../client/assets/scripts/core/state/game-state';
+import { Card } from '../../client/assets/scripts/core/cards/card';
+import { createDoubleDeck, DEFAULT_DECK_COUNT, DeckCount } from '../../client/assets/scripts/core/cards/deck';
+import { DECK_OPTIONS, deckOption } from '../../client/assets/scripts/ui/deck-options';
+import {
+  SUIT_GLYPH as suitGlyph, HISTORY_ACTION_LABEL, errorMessage, formatSeed, isRedCard, phaseMessage as tablePhaseMessage, sortCardsForDisplay, playerName, rankLabel,
+} from '../../client/assets/scripts/ui/labels';
+import { dragSelection } from '../../client/assets/scripts/ui/hand-selection';
 import { BrowserGameSession, BrowserSessionSnapshot } from './browser-session';
 import './style.css';
 
 const root = document.querySelector<HTMLDivElement>('#app');
 if (root === null) throw new Error('Missing #app root');
 
+// One deck uses the same card IDs as the first of two decks, so this map serves both versions.
 const allCards = new Map(createDoubleDeck().map((card) => [card.id, card]));
-const suitGlyph: Record<Suit, string> = {
-  [Suit.CLUB]: '♣',
-  [Suit.DIAMOND]: '♦',
-  [Suit.HEART]: '♥',
-  [Suit.SPADE]: '♠',
-  [Suit.JOKER]: '✦',
-};
 
 let helpOpen = false;
 let notice = '';
 let noticeTimer: number | undefined;
-let session = new BrowserGameSession(readSeedFromUrl() ?? 414);
+/** Version picked on the start screen; "同种子重开" and "新开一局" keep it. */
+let chosenDeckCount: DeckCount = readDeckCountFromUrl() ?? DEFAULT_DECK_COUNT;
+let session = new BrowserGameSession(readSeedFromUrl() ?? 414, { deckCount: chosenDeckCount });
 let unsubscribe = session.subscribe(render);
 
 function escapeHtml(value: string | number): string {
@@ -39,73 +39,32 @@ function readSeedFromUrl(): number | null {
   return Number.isSafeInteger(seed) && seed >= 0 && seed <= 0xffff_ffff ? seed : null;
 }
 
-function formatSeed(seed: number): string {
-  return `#${seed.toString().padStart(10, '0')}`;
+function readDeckCountFromUrl(): DeckCount | null {
+  const value = new URLSearchParams(window.location.search).get('decks');
+  return value === '1' ? 1 : value === '2' ? 2 : null;
 }
 
-function rankLabel(rank: Rank): string {
-  switch (rank) {
-    case Rank.THREE: return '3';
-    case Rank.FOUR: return '4';
-    case Rank.FIVE: return '5';
-    case Rank.SIX: return '6';
-    case Rank.SEVEN: return '7';
-    case Rank.EIGHT: return '8';
-    case Rank.NINE: return '9';
-    case Rank.TEN: return '10';
-    case Rank.JACK: return 'J';
-    case Rank.QUEEN: return 'Q';
-    case Rank.KING: return 'K';
-    case Rank.ACE: return 'A';
-    case Rank.TWO: return '2';
-    case Rank.SMALL_JOKER: return '小王';
-    case Rank.BIG_JOKER: return '大王';
-  }
+/** The started game's version, or the one chosen for the next start. */
+function shownDeckCount(snapshot: BrowserSessionSnapshot): DeckCount {
+  return snapshot.state.deckCount ?? chosenDeckCount;
 }
 
-function sortHand(cards: readonly Card[]): Card[] {
-  return [...cards].sort((left, right) => left.rank - right.rank || left.suit - right.suit || left.deckIndex - right.deckIndex);
-}
 
-function playerName(playerId: number): string {
-  if (playerId === 0) return '你';
-  if (playerId === 2) return '搭档';
-  return playerId === 1 ? '左对家' : '右对家';
-}
 
-function phaseMessage(state: GameState): string {
-  if (state.phase === 'ROUND_RESULT') return '本局结束';
-  if (state.phase === 'GOUCHA_QUERY' && state.currentPlayer === 0) {
-    const addition = state.trick?.gouCha?.nextAddition;
-    return addition === 'CHA' ? '轮到你岔：选同点数的一对牌' : '轮到你勾：选同点数的一张牌';
-  }
-  if (state.currentPlayer === 0 && state.phase === 'FREE_LEAD') return '轮到你自由出牌';
-  if (state.currentPlayer === 0 && state.phase === 'RESPONDING') return '轮到你压牌，或选择不出';
-  return state.currentPlayer === null ? '正在准备牌局' : `${playerName(state.currentPlayer)}思考中`;
+
+
+
+
+function phaseMessage(snapshot: BrowserSessionSnapshot): string {
+  return tablePhaseMessage(snapshot.state, snapshot.viewModel, snapshot.isBusy);
 }
 
 function humanError(snapshot: BrowserSessionSnapshot): string {
-  const code = snapshot.viewModel.controls.errorKey ?? snapshot.errorCode;
-  if (code === null) return '';
-  const messages: Record<string, string> = {
-    'selection.empty': '先选择要出的牌。',
-    'pattern.mixed_ranks': '对子需要两张同点数牌。',
-    'pattern.sequence_too_short': '顺子至少需要连续三张。',
-    'pattern.sequence_gap': '顺子点数必须连续。',
-    'pattern.sequence_forbidden_rank': '2 和大小王不能加入顺子。',
-    'pattern.sequence_multiplicity': '顺子每个点数的张数必须一致。',
-    'pattern.unsupported_combination': '这组牌不符合已确认的牌型。',
-    'rule.not_current_player': '现在还没有轮到你。',
-    'rule.wrong_phase': '当前阶段不能执行这个动作。',
-    'rule.does_not_beat_current_play': '这组牌压不过桌面牌。',
-    'rule.card_not_owned': '选择的牌已不在你的手牌中。',
-    'INVALID_GOUCHA_SELECTION': '请选择符合岔/勾要求的牌。',
-  };
-  return messages[code] ?? `操作未生效（${code}）`;
+  return errorMessage(snapshot.viewModel.controls.errorKey ?? snapshot.errorCode);
 }
 
-function renderCard(card: Card, selected: boolean, compact = false): string {
-  const red = card.suit === Suit.HEART || card.suit === Suit.DIAMOND || card.rank === Rank.BIG_JOKER;
+function renderCard(card: Card, selected: boolean, compact = false, showCopy = true): string {
+  const red = isRedCard(card);
   const rank = rankLabel(card.rank);
   const glyph = suitGlyph[card.suit];
   const classes = ['playing-card', red ? 'is-red' : '', selected ? 'is-selected' : '', compact ? 'is-compact' : '']
@@ -113,20 +72,24 @@ function renderCard(card: Card, selected: boolean, compact = false): string {
   return `<span class="${classes}" aria-label="${escapeHtml(rank)}${glyph}">
     <span class="card-corner"><strong>${escapeHtml(rank)}</strong><i>${glyph}</i></span>
     <span class="card-center-suit">${glyph}</span>
-    <span class="card-copy">${card.deckIndex === 0 ? 'I' : 'II'}</span>
+    ${showCopy ? `<span class="card-copy">${card.deckIndex === 0 ? 'I' : 'II'}</span>` : ''}
   </span>`;
 }
 
 function renderHand(snapshot: BrowserSessionSnapshot): string {
   const hand = snapshot.viewModel.seats.bottom.cards ?? [];
-  if (hand.length === 0) return '<p class="empty-hand">开局后，你的 27 张手牌会在这里显示。</p>';
+  if (hand.length === 0) {
+    return `<p class="empty-hand">开局后，你的 <span data-deck-hand>${deckOption(shownDeckCount(snapshot)).handSizeLabel}</span> 张手牌会在这里显示。</p>`;
+  }
+  // With one deck every card is unique, so the copy mark (I/II) would only add noise.
+  const showCopy = shownDeckCount(snapshot) === 2;
   const selected = new Set(snapshot.selectedCardIds);
   const prompt = snapshot.viewModel.gouCha;
   const eligible = prompt === null ? null : new Set(prompt.eligibleCardIds);
-  return `<div class="hand-track" aria-label="你的手牌">${sortHand(hand).map((card) => {
+  return `<div class="hand-track" aria-label="你的手牌">${sortCardsForDisplay(hand).map((card) => {
     const active = selected.has(card.id);
     const ineligible = eligible !== null && !eligible.has(card.id);
-    const cardHtml = renderCard(card, active);
+    const cardHtml = renderCard(card, active, false, showCopy);
     return `<button class="hand-card ${active ? 'is-picked' : ''} ${ineligible ? 'is-ineligible' : ''}"
       type="button" data-action="toggle-card" data-card-id="${escapeHtml(card.id)}"
       aria-label="选择 ${escapeHtml(rankLabel(card.rank))}${suitGlyph[card.suit]}"
@@ -161,28 +124,32 @@ function renderSeat(position: 'top' | 'left' | 'right' | 'bottom', snapshot: Bro
 
 function renderCenter(snapshot: BrowserSessionSnapshot): string {
   const trick = snapshot.state.trick;
-  const currentCards = trick?.currentPlay.cardIds.flatMap((id) => {
+  const center = snapshot.viewModel.center;
+  const currentCards = center.cardIds.flatMap((id) => {
     const card = allCards.get(id);
-    return card === undefined ? [] : [renderCard(card, false, true)];
-  }) ?? [];
-  const holder = snapshot.viewModel.center.holderId;
+    return card === undefined ? [] : [renderCard(card, false, true, shownDeckCount(snapshot) === 2)];
+  });
+  const holder = center.holderId;
   const history = snapshot.state.publicHistory.slice(-4).reverse().map((entry) => {
-    const action = entry.kind === 'PLAY_CARDS' ? '出牌' : entry.kind === 'PASS' ? '不出' : entry.kind;
+    const action = HISTORY_ACTION_LABEL[entry.kind];
     return `<li><span>${playerName(entry.playerId)}</span><b>${action}</b><i>#${entry.actionNumber}</i></li>`;
   }).join('');
   const content = currentCards.length > 0
     ? `<div class="table-cards">${currentCards.join('')}</div>`
     : '<div class="table-emblem"><span>4</span><i>A</i><span>4</span></div>';
-  const contributions = snapshot.viewModel.center.contributions.map((part) => `${playerName(part.playerId)}${part.label}`).join(' · ');
+  // CHA/GOU are actions on the single, so a chain reads like "单 6 · 左对家岔 · 你勾".
+  const actions = center.contributions.filter((part) => part.label !== '出牌').map((part) => `${playerName(part.playerId)}${part.label}`);
+  const headline = [center.patternLabel, ...actions].join(' · ');
+  const contributions = center.contributions.filter((part) => part.label === '出牌').map((part) => `${playerName(part.playerId)}${part.label}`).join(' · ');
   return `<section class="center-table" aria-label="牌桌中央">
     <div class="table-orbit orbit-one"></div><div class="table-orbit orbit-two"></div>
     <div class="table-topline"><span class="eyebrow">CURRENT TRICK</span><span class="trick-index">${trick === null ? '—' : `#${trick.currentPlay.actionNumber}`}</span></div>
-    <div class="pattern-label">${escapeHtml(snapshot.viewModel.center.patternLabel)}</div>
+    <div class="pattern-label">${escapeHtml(headline)}</div>
     ${content}
     <p class="holder-line">${holder === null ? '等待首手出牌' : `当前持有：${playerName(holder)}`}</p>
     ${contributions ? `<p class="contribution-line">${escapeHtml(contributions)}</p>` : ''}
     <div class="turn-banner ${snapshot.state.currentPlayer === 0 ? 'for-human' : ''}" role="status" aria-live="polite">
-      <span class="status-dot"></span>${escapeHtml(phaseMessage(snapshot.state))}
+      <span class="status-dot"></span>${escapeHtml(phaseMessage(snapshot))}
     </div>
     <ol class="action-history" aria-label="最近动作">${history || '<li class="history-empty">等待第一手</li>'}</ol>
   </section>`;
@@ -209,7 +176,7 @@ function renderControls(snapshot: BrowserSessionSnapshot): string {
         <button class="button button-primary" data-action="play" ${!controls.playEnabled || snapshot.isBusy ? 'disabled' : ''}>出牌 <kbd>↵</kbd></button>
       </div>`;
   return `<div class="hand-controls">
-    <div class="selection-caption"><span>${picked.length ? `已选 ${picked.length} 张` : '点击手牌选择'}</span><span>${snapshot.state.currentPlayer === 0 && snapshot.state.phase === 'RESPONDING' ? '可压牌或不出' : ''}</span></div>
+    <div class="selection-caption"><span>${picked.length ? `已选 ${picked.length} 张` : '点击手牌选择'}</span><span>${snapshot.state.currentPlayer === 0 && snapshot.state.phase === 'RESPONDING' && !snapshot.isBusy ? '可压牌或不出' : ''}</span></div>
     ${actionButtons}
     <p class="inline-error" role="status">${escapeHtml(error)}</p>
   </div>`;
@@ -220,7 +187,7 @@ function renderResult(snapshot: BrowserSessionSnapshot): string {
   if (result === null) return '';
   const order = result.places.map((playerId, index) => `<li><span class="result-place">0${index + 1}</span><span>${playerName(playerId)}</span><i>${playerId % 2 === result.winningTeam ? 'WINNING TEAM' : 'OPPONENT'}</i></li>`).join('');
   return `<div class="modal-scrim"><section class="result-card" role="dialog" aria-modal="true" aria-labelledby="result-title">
-    <span class="eyebrow">ROUND COMPLETE · ${formatSeed(result.seed)}</span>
+    <span class="eyebrow">ROUND COMPLETE · ${formatSeed(result.seed)} · ${deckOption(shownDeckCount(snapshot)).label}</span>
     <h2 id="result-title">${result.winningTeam === 0 ? '蓝队拿下这局' : '金队拿下这局'}</h2>
     <p class="result-subtitle">抓 ${result.capturedOpponents} 人 · 单局结算</p>
     <ol class="result-order">${order}</ol>
@@ -234,14 +201,26 @@ function renderHelp(): string {
     <section class="help-card" role="dialog" aria-modal="true" aria-labelledby="help-title" data-dialog>
       <button class="icon-button help-close" data-action="close-help" aria-label="关闭帮助">×</button>
       <span class="eyebrow">QUICK RULES</span><h2 id="help-title">一局 4A4，四人两队</h2>
-      <p>座位 0 和 2 为蓝队，座位 1 和 3 为金队。每人 27 张牌，轮流严格压牌或选择不出。</p>
-      <div class="rule-grid"><article><b>牌型</b><span>单张、对子、单/双/三顺、轰/炸弹、王炸、4A4。</span></article>
-        <article><b>勾岔</b><span>单牌可以被另一人用同点数对子“岔”；岔后才轮到另一人用同点数单牌“勾”。不能自己接自己的牌。</span></article>
+      <p>座位 0 和 2 为蓝队，座位 1 和 3 为金队。两副牌每人 27 张；一副牌 54 张，每队一人 14 张、一人 13 张。轮流严格压牌或选择不出。</p>
+      <div class="rule-grid"><article><b>首家</b><span>持红桃 3 的玩家先出。两副牌时依次比较红桃 3、黑桃 3、梅花 3、方块 3 的张数，多者先出，仍相同时按种子决定。首家可出任意合法牌型。</span></article>
+        <article><b>牌型</b><span>单张、对子、单/双/三顺、轰/炸弹、王炸、4A4。一副牌没有 5 张以上的同点数和红桃 4A4。</span></article>
+        <article><b>勾岔</b><span>单牌可以被另一人用同点数对子“岔”；岔后才轮到另一人用同点数单牌“勾”，岔、勾交替，不能自己接自己的牌。岔和勾是动作，不是牌型：有人岔过后链条一停，这一轮立刻结束（死岔/死勾），谁也不能再压，最后岔或勾的人接着出牌。一副牌每个点数只有 4 张，单、岔、勾之后链条自然停止。</span></article>
         <article><b>结束</b><span>只剩一人有牌时结算；队友出完顺序决定抓人数。种子可复制分享并复现同一局。</span></article>
       </div>
       <button class="button button-primary" data-action="close-help">明白了</button>
     </section>
   </div>`;
+}
+
+function renderDeckChoice(): string {
+  const options = DECK_OPTIONS.map((option) => `<label class="deck-option">
+      <input type="radio" name="deck" value="${option.deckCount}" ${option.deckCount === chosenDeckCount ? 'checked' : ''} />
+      <span class="deck-option-body"><b>${escapeHtml(option.label)}</b><small>${escapeHtml(option.summary)}</small></span>
+    </label>`).join('');
+  return `<div class="deck-choice" role="radiogroup" aria-labelledby="deck-label">
+      <span id="deck-label" class="field-label">牌数 <span>规则、AI 和结算两种都一样</span></span>
+      <div class="deck-options">${options}</div>
+    </div>`;
 }
 
 function renderStart(snapshot: BrowserSessionSnapshot): string {
@@ -252,12 +231,13 @@ function renderStart(snapshot: BrowserSessionSnapshot): string {
     <h1 id="start-title">一局 4A4</h1>
     <p>把注意力留给牌桌。固定 2 对 2，三位基础 AI，完全离线。</p>
     <form id="start-form" class="seed-form">
-      <label for="seed-input">随机种子 <span>相同种子会复现相同发牌与 AI 决策</span></label>
+      ${renderDeckChoice()}
+      <label for="seed-input" class="field-label">随机种子 <span>相同种子和牌数会复现相同发牌与 AI 决策</span></label>
       <div class="seed-entry"><span>#</span><input id="seed-input" name="seed" inputmode="numeric" pattern="[0-9]{1,10}" maxlength="10" value="${snapshot.state.rootSeed ?? session.seed}" aria-describedby="seed-error" /></div>
       <p id="seed-error" class="inline-error" role="alert"></p>
       <button class="button button-primary start-button" type="submit">开始练习 <span>→</span></button>
     </form>
-    <div class="start-foot"><span>108 张牌 · 每人 27 张</span><span>规则版本 ${escapeHtml(snapshot.state.rulesVersion)}</span></div>
+    <div class="start-foot"><span data-deck-summary>${escapeHtml(deckOption(chosenDeckCount).summary)}</span><span>规则版本 ${escapeHtml(snapshot.state.rulesVersion)}</span></div>
   </section></div>`;
 }
 
@@ -277,7 +257,7 @@ function render(snapshot: BrowserSessionSnapshot): void {
       </nav>
     </header>
     <main>
-      <div class="table-heading"><div><span class="eyebrow">4A4 · SINGLE ROUND</span><h2>练习牌桌</h2></div>
+      <div class="table-heading"><div><span class="eyebrow">4A4 · SINGLE ROUND · <span data-deck-label>${deckOption(shownDeckCount(snapshot)).label}</span></span><h2>练习牌桌</h2></div>
         <div class="round-progress"><span>固定队伍</span><b>0 / 2 <i>VS</i> 1 / 3</b></div></div>
       <section class="table-grid" aria-label="4A4 牌桌">
         ${renderSeat('top', snapshot)}
@@ -286,7 +266,7 @@ function render(snapshot: BrowserSessionSnapshot): void {
         ${renderSeat('right', snapshot)}
         <section class="hand-zone" aria-label="玩家手牌">
           <div class="hand-header"><div><span class="eyebrow">YOUR HAND</span><h3>你的手牌 <span>${snapshot.viewModel.seats.bottom.remaining}</span></h3></div>
-            <div class="hand-hint">选中牌面加入组合 <i>·</i> 同点数牌会自动对齐</div></div>
+            <div class="hand-hint">点牌选择 <i>·</i> 按住拖过多张一次选中</div></div>
           <div class="hand-viewport">${renderHand(snapshot)}</div>
           ${renderControls(snapshot)}
         </section>
@@ -308,13 +288,15 @@ function setNotice(message: string): void {
   }, 2400);
 }
 
-function replaceSession(seed: number): void {
+function replaceSession(next: BrowserGameSession): void {
   unsubscribe();
   helpOpen = false;
-  session = new BrowserGameSession(seed);
+  session = next;
+  chosenDeckCount = next.deckCount;
   unsubscribe = session.subscribe(render);
   const url = new URL(window.location.href);
-  url.searchParams.set('seed', String(seed));
+  url.searchParams.set('seed', String(next.seed));
+  url.searchParams.set('decks', String(next.deckCount));
   window.history.replaceState({}, '', url);
 }
 
@@ -337,10 +319,53 @@ root.addEventListener('submit', async (event) => {
     seedInput?.focus();
     return;
   }
-  replaceSession(seed);
+  const deck = form.querySelector<HTMLInputElement>('input[name="deck"]:checked');
+  if (deck !== null) chosenDeckCount = deck.value === '1' ? 1 : 2;
+  replaceSession(new BrowserGameSession(seed, { deckCount: chosenDeckCount }));
   const started = await session.start();
   if (!started) setNotice(`无法开始游戏：${session.lastErrorCode ?? '未知错误'}`);
 });
+
+/**
+ * Dragging the mouse (or a pen) across the hand selects every card it passes; starting on a selected card
+ * clears them instead. Touch keeps scrolling the hand, which is wider than a phone screen.
+ */
+let handDrag: { pointer: number; ids: string[]; base: string[]; from: number; to: number; moved: boolean } | null = null;
+let suppressCardClickUntil = 0;
+
+function handCardAt(x: number, y: number): HTMLElement | null {
+  return document.elementFromPoint(x, y)?.closest<HTMLElement>('.hand-card[data-card-id]') ?? null;
+}
+
+root.addEventListener('pointerdown', (event) => {
+  if (event.pointerType === 'touch' || event.button !== 0 || !(event.target instanceof Element)) return;
+  const card = event.target.closest<HTMLElement>('.hand-card[data-card-id]');
+  if (card === null || card.hasAttribute('disabled')) return;
+  const ids = [...root.querySelectorAll<HTMLElement>('.hand-card[data-card-id]')].map((element) => element.dataset.cardId ?? '');
+  const from = ids.indexOf(card.dataset.cardId ?? '');
+  if (from < 0) return;
+  event.preventDefault();
+  handDrag = { pointer: event.pointerId, ids, base: [...session.selectedCardIds], from, to: from, moved: false };
+});
+
+window.addEventListener('pointermove', (event) => {
+  const drag = handDrag;
+  if (drag === null || drag.pointer !== event.pointerId) return;
+  const index = drag.ids.indexOf(handCardAt(event.clientX, event.clientY)?.dataset.cardId ?? '');
+  if (index < 0 || index === drag.to) return;
+  drag.to = index;
+  drag.moved = true;
+  session.setSelection(dragSelection(drag.base, drag.ids, drag.from, index));
+});
+
+function endHandDrag(event: PointerEvent): void {
+  if (handDrag === null || handDrag.pointer !== event.pointerId) return;
+  // The click that follows a drag must not toggle the card it ended on.
+  if (handDrag.moved) suppressCardClickUntil = performance.now() + 400;
+  handDrag = null;
+}
+window.addEventListener('pointerup', endHandDrag);
+window.addEventListener('pointercancel', endHandDrag);
 
 root.addEventListener('click', async (event) => {
   const target = event.target;
@@ -349,6 +374,7 @@ root.addEventListener('click', async (event) => {
   if (button === null || button.hasAttribute('disabled')) return;
   const action = button.dataset.action;
   if (action === 'toggle-card') {
+    if (performance.now() < suppressCardClickUntil) return;
     const cardId = button.dataset.cardId;
     if (cardId !== undefined) session.toggleCard(cardId);
     return;
@@ -371,14 +397,25 @@ root.addEventListener('click', async (event) => {
   }
   if (action === 'decline-goucha') { await session.declineGouCha(); return; }
   if (action === 'replay') {
-    replaceSession(session.seed);
+    replaceSession(session.replay());
     await session.start();
     return;
   }
   if (action === 'new-game') {
-    replaceSession(Date.now() >>> 0);
+    replaceSession(new BrowserGameSession(Date.now() >>> 0, { deckCount: session.deckCount }));
     return;
   }
+});
+
+// Switching the version updates its counts in place, so a seed being typed is not re-rendered away.
+root.addEventListener('change', (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement) || input.name !== 'deck' || !input.checked) return;
+  chosenDeckCount = input.value === '1' ? 1 : 2;
+  const option = deckOption(chosenDeckCount);
+  root.querySelectorAll('[data-deck-summary]').forEach((element) => { element.textContent = option.summary; });
+  root.querySelectorAll('[data-deck-hand]').forEach((element) => { element.textContent = option.handSizeLabel; });
+  root.querySelectorAll('[data-deck-label]').forEach((element) => { element.textContent = option.label; });
 });
 
 root.addEventListener('keydown', async (event) => {

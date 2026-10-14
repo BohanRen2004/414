@@ -10,7 +10,8 @@ export type RuleErrorCode =
   | 'GOUCHA_COUNT_MISMATCH'
   | 'GOUCHA_RANK_MISMATCH'
   | 'SELF_GOUCHA_FORBIDDEN'
-  | 'GAME_ALREADY_FINISHED';
+  | 'GAME_ALREADY_FINISHED'
+  | 'INVALID_DECK_COUNT';
 
 export interface RuleError {
   readonly code: RuleErrorCode;

@@ -1,4 +1,4 @@
-export const RULES_VERSION = '1.0.0' as const;
+export const RULES_VERSION = '1.1.0' as const;
 
 export * from './cards/card';
 export * from './cards/deck';
@@ -12,5 +12,6 @@ export * from './state/game-action';
 export * from './state/game-event';
 export * from './state/game-state';
 export * from './state/rule-error';
+export * from './rules/first-player';
 export * from './rules/goucha';
 export * from './rules/reducer';

@@ -86,9 +86,8 @@ describe('table view model', () => {
         3: [card('other-three', Rank.EIGHT)],
       },
       gouCha: {
-        rank: Rank.FIVE, basePlay, additions: [], aggregateCardIds: ['base-five'],
-        aggregatePattern: { kind: 'SINGLE', rank: Rank.FIVE }, holderId: 0,
-        nextAddition: 'CHA', queryCursor: 0, declinedPlayerIds: [],
+        rank: Rank.FIVE, basePlay, additions: [], holderId: 0,
+        nextAddition: 'CHA', queryCursor: 1, declinedPlayerIds: [],
       },
       overrides: {
         publicHistory: [{ actionNumber: 1, playerId: 0, kind: 'PLAY_CARDS', cardIds: ['base-five'] }],
@@ -99,6 +98,8 @@ describe('table view model', () => {
     expect(vm.gouCha?.suggestedCardIds).toHaveLength(2);
     expect(vm.center.contributions).toEqual([{ playerId: 0, label: '出牌', cardIds: ['base-five'] }]);
     expect(vm.controls).toMatchObject({ showPlay: false, showPass: false, showHint: false });
+    const picked = buildTableViewModel(state, humanInput(vm.gouCha!.suggestedCardIds, 1));
+    expect(picked.controls.errorKey).toBeNull();
 
     const gouBase = group([card('gou-base-five', Rank.FIVE)], 0, 1);
     const gouState = buildState({
@@ -112,9 +113,7 @@ describe('table view model', () => {
       gouCha: {
         rank: Rank.FIVE, basePlay: gouBase,
         additions: [{ addition: 'CHA', playerId: 1, cardIds: ['gou-cha-a', 'gou-cha-b'], actionNumber: 2 }],
-        aggregateCardIds: ['gou-base-five', 'gou-cha-a', 'gou-cha-b'],
-        aggregatePattern: { kind: 'N_OF_KIND_BOMB', rank: Rank.FIVE, count: 3 },
-        holderId: 1, nextAddition: 'GOU', queryCursor: 1, declinedPlayerIds: [],
+        holderId: 1, nextAddition: 'GOU', queryCursor: 2, declinedPlayerIds: [],
       },
       overrides: {
         publicHistory: [
@@ -127,23 +126,95 @@ describe('table view model', () => {
     expect(gouVm.gouCha).toMatchObject({ playerId: 2, addition: 'GOU', rank: Rank.FIVE, requiredCount: 1 });
     expect(gouVm.gouCha?.suggestedCardIds).toEqual(['gou-five']);
     expect(gouVm.center.contributions.map((entry) => entry.label)).toEqual(['出牌', '岔']);
+    expect(gouVm.center).toMatchObject({ patternLabel: '单 5', holderId: 1, pending: null });
+    expect(gouVm.center.cardIds).toEqual(['gou-base-five', 'gou-cha-a', 'gou-cha-b']);
   });
 
-  it('renders closed-chain contribution history in order', () => {
-    const currentPlay = group([card('agg-a', Rank.FIVE), card('agg-b', Rank.FIVE), card('agg-c', Rank.FIVE)], 2, 3);
+  it('labels chain cards by the single and its CHA/GOU actions, never as 轰 or 炸弹', () => {
+    const basePlay = group([card('base-five', Rank.FIVE)], 3, 1);
+    const additions = [
+      { addition: 'CHA' as const, playerId: 1 as const, cardIds: ['cha-1a', 'cha-1b'], actionNumber: 2 },
+      { addition: 'GOU' as const, playerId: 0 as const, cardIds: ['gou-0'], actionNumber: 3 },
+      { addition: 'CHA' as const, playerId: 2 as const, cardIds: ['cha-2a', 'cha-2b'], actionNumber: 4 },
+      { addition: 'GOU' as const, playerId: 3 as const, cardIds: ['gou-3'], actionNumber: 5 },
+    ];
+    const history = [
+      { actionNumber: 1, playerId: 3 as const, kind: 'PLAY_CARDS' as const, cardIds: ['base-five'] },
+      ...additions.map((entry) => ({
+        actionNumber: entry.actionNumber, playerId: entry.playerId, kind: entry.addition, cardIds: entry.cardIds,
+      })),
+    ];
+    for (const count of [1, 2, 3, 4]) {
+      const made = additions.slice(0, count);
+      const last = made[made.length - 1]!;
+      const queried = ((last.playerId + 1) % 4) as PlayerId;
+      const state = buildState({
+        phase: 'GOUCHA_QUERY', currentPlayer: queried,
+        hands: {
+          0: [card('zero', Rank.SIX)], 1: [card('one', Rank.SEVEN)], 2: [card('two', Rank.EIGHT)], 3: [card('three', Rank.NINE)],
+        },
+        gouCha: {
+          rank: Rank.FIVE, basePlay, additions: made, holderId: last.playerId,
+          nextAddition: last.addition === 'CHA' ? 'GOU' : 'CHA', queryCursor: queried, declinedPlayerIds: [],
+        },
+        overrides: { publicHistory: history.slice(0, count + 1) },
+      });
+      for (const viewer of [0, 1, 2, 3] as const) {
+        const vm = buildTableViewModel(state, humanInput([], viewer));
+        expect(vm.center.patternLabel, `${count} additions`).toBe('单 5');
+        expect(vm.center.patternLabel).not.toMatch(/轰|炸弹|个/);
+        expect(vm.center.holderId).toBe(last.playerId);
+        expect(vm.center.cardIds).toEqual(['base-five', ...made.flatMap((entry) => entry.cardIds)]);
+        expect(vm.center.contributions).toEqual([
+          { playerId: 3, label: '出牌', cardIds: ['base-five'] },
+          ...made.map((entry) => ({ playerId: entry.playerId, label: entry.addition === 'CHA' ? '岔' : '勾', cardIds: entry.cardIds })),
+        ]);
+        expect(vm.center.pending).toEqual(viewer === queried
+          ? null
+          : { playerId: last.playerId, addition: last.addition, rank: Rank.FIVE });
+      }
+    }
+  });
+
+  it('keeps the chain on the table when its last CHA ends the round', () => {
+    const basePlay = group([card('end-five', Rank.FIVE)], 0, 1);
+    const result: GameResult = { finishOrder: [2, 3, 1, 0], winningTeam: 0, capturedOpponents: 0 };
     const state = buildState({
-      phase: 'RESPONDING', currentPlayer: 0,
-      hands: { 0: [card('human', Rank.SIX)], 1: [card('one', Rank.SEVEN)], 2: [card('two', Rank.EIGHT)], 3: [card('three', Rank.NINE)] },
-      currentPlay, holderId: 2,
+      phase: 'ROUND_RESULT', currentPlayer: null,
+      hands: { 0: [card('last-left', Rank.NINE)], 1: [], 2: [], 3: [] },
+      finishOrder: [2, 3, 1, 0],
+      gouCha: {
+        rank: Rank.FIVE, basePlay,
+        additions: [{ addition: 'CHA', playerId: 1, cardIds: ['end-cha-a', 'end-cha-b'], actionNumber: 2 }],
+        holderId: 1, nextAddition: 'GOU', queryCursor: 1, declinedPlayerIds: [],
+      },
       overrides: {
+        result,
         publicHistory: [
-          { actionNumber: 1, playerId: 0, kind: 'PLAY_CARDS', cardIds: ['agg-a'] },
-          { actionNumber: 2, playerId: 1, kind: 'CHA', cardIds: ['agg-b', 'agg-c'] },
+          { actionNumber: 1, playerId: 0, kind: 'PLAY_CARDS', cardIds: ['end-five'] },
+          { actionNumber: 2, playerId: 1, kind: 'CHA', cardIds: ['end-cha-a', 'end-cha-b'] },
         ],
       },
     });
     const vm = buildTableViewModel(state, humanInput());
+    expect(vm.center).toMatchObject({ patternLabel: '单 5', holderId: 1, pending: null });
+    expect(vm.center.cardIds).toEqual(['end-five', 'end-cha-a', 'end-cha-b']);
     expect(vm.center.contributions.map((entry) => entry.label)).toEqual(['出牌', '岔']);
+  });
+
+  it('still names a directly played three or four of a kind 轰 and 炸弹', () => {
+    for (const [count, label] of [[3, '轰'], [4, '炸弹'], [6, '6 个 5']] as const) {
+      const tableFives = sameRank(Rank.FIVE, count).map((entry) => ({ ...entry, id: `direct:${entry.id}` }));
+      const state = buildState({
+        phase: 'RESPONDING', currentPlayer: 0,
+        hands: { 0: [card('human', Rank.SIX)], 1: [card('one', Rank.SEVEN)], 2: [card('two', Rank.EIGHT)], 3: [card('three', Rank.NINE)] },
+        currentPlay: group(tableFives, 1, 1), holderId: 1,
+      });
+      const vm = buildTableViewModel(state, humanInput());
+      expect(vm.center.patternLabel).toBe(label);
+      expect(vm.center.cardIds).toEqual(tableFives.map((entry) => entry.id));
+      expect(vm.center.pending).toBeNull();
+    }
   });
 
   it('enables only a legal selected play and maps invalid reasons to stable keys', () => {
