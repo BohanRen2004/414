@@ -110,10 +110,37 @@ function renderHand(snapshot: BrowserSessionSnapshot): string {
  * On touch screens the hand fits the screen instead of scrolling, so a finger sliding across it selects
  * cards; a phone held upright gets two rows so each card keeps a strip wide enough to read and hit.
  */
-// Turning the phone changes how many rows the hand needs.
+/**
+ * Phones always play sideways: the landscape table (html.phone) fills one screen, and a phone held upright
+ * gets the whole app turned a quarter (html.rotated). The app's own size goes to --app-w/--app-h, with
+ * the notch side kept clear through --safe-left/--safe-right.
+ */
+function isPhone(): boolean {
+  return touchLayout() && Math.min(window.innerWidth, window.innerHeight) <= 540;
+}
+
+function applyPhoneLayout(): void {
+  // A keyboard opening for the seed field shrinks the window; keep the layout until it closes.
+  if (document.activeElement instanceof HTMLInputElement && document.documentElement.classList.contains('phone')) return;
+  const html = document.documentElement;
+  const phone = isPhone();
+  const rotated = phone && window.innerHeight > window.innerWidth;
+  html.classList.toggle('phone', phone);
+  html.classList.toggle('rotated', rotated);
+  html.style.setProperty('--app-w', `${rotated ? window.innerHeight : window.innerWidth}px`);
+  html.style.setProperty('--app-h', `${rotated ? window.innerWidth : window.innerHeight}px`);
+  // Turned a quarter clockwise, the app's left edge is the top of the upright screen.
+  html.style.setProperty('--safe-left', rotated ? 'env(safe-area-inset-top, 0px)' : 'env(safe-area-inset-left, 0px)');
+  html.style.setProperty('--safe-right', rotated ? 'env(safe-area-inset-bottom, 0px)' : 'env(safe-area-inset-right, 0px)');
+}
+applyPhoneLayout();
+
+// Turning the phone changes the layout and how many rows the hand needs.
 window.addEventListener('resize', () => {
+  const wasPhone = document.documentElement.classList.contains('phone');
+  applyPhoneLayout();
   const rows = handRowCount(session.snapshot().viewModel.seats.bottom.cards?.length ?? 0);
-  if (rows !== shownHandRows && session.state.phase !== 'SETUP') render(session.snapshot());
+  if ((rows !== shownHandRows || wasPhone !== isPhone()) && session.state.phase !== 'SETUP') render(session.snapshot());
 });
 
 function touchLayout(): boolean {
@@ -121,7 +148,8 @@ function touchLayout(): boolean {
 }
 
 function handRowCount(cardCount: number): 1 | 2 {
-  if (!touchLayout() || cardCount === 0) return 1;
+  // Phones always play in landscape, where one row fits.
+  if (!touchLayout() || cardCount === 0 || isPhone()) return 1;
   const usable = Math.max(200, document.documentElement.clientWidth - 40);
   return usable / cardCount < 22 ? 2 : 1;
 }
