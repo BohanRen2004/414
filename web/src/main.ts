@@ -20,6 +20,8 @@ let noticeTimer: number | undefined;
 /** Version picked on the start screen; "同种子重开" and "新开一局" keep it. */
 let chosenDeckCount: DeckCount = readDeckCountFromUrl() ?? DEFAULT_DECK_COUNT;
 let session = new BrowserGameSession(readSeedFromUrl() ?? 414, { deckCount: chosenDeckCount });
+/** Rows the hand was last drawn in (touch screens only use two). */
+let shownHandRows = 0;
 let unsubscribe = session.subscribe(render);
 
 function escapeHtml(value: string | number): string {
@@ -86,7 +88,7 @@ function renderHand(snapshot: BrowserSessionSnapshot): string {
   const selected = new Set(snapshot.selectedCardIds);
   const prompt = snapshot.viewModel.gouCha;
   const eligible = prompt === null ? null : new Set(prompt.eligibleCardIds);
-  return `<div class="hand-track" aria-label="你的手牌">${sortCardsForDisplay(hand).map((card) => {
+  const cardButton = (card: Card): string => {
     const active = selected.has(card.id);
     const ineligible = eligible !== null && !eligible.has(card.id);
     const cardHtml = renderCard(card, active, false, showCopy);
@@ -94,7 +96,34 @@ function renderHand(snapshot: BrowserSessionSnapshot): string {
       type="button" data-action="toggle-card" data-card-id="${escapeHtml(card.id)}"
       aria-label="选择 ${escapeHtml(rankLabel(card.rank))}${suitGlyph[card.suit]}"
       aria-pressed="${active}" ${snapshot.isBusy ? 'disabled' : ''}>${cardHtml}</button>`;
-  }).join('')}</div>`;
+  };
+  const sorted = sortCardsForDisplay(hand);
+  const rows = handRowCount(sorted.length);
+  shownHandRows = rows;
+  const perRow = Math.ceil(sorted.length / rows);
+  const rowHtml = Array.from({ length: rows }, (_, row) =>
+    `<div class="hand-row">${sorted.slice(row * perRow, (row + 1) * perRow).map(cardButton).join('')}</div>`).join('');
+  return `<div class="hand-track ${touchLayout() ? 'is-fitted' : ''}" aria-label="你的手牌">${rowHtml}</div>`;
+}
+
+/**
+ * On touch screens the hand fits the screen instead of scrolling, so a finger sliding across it selects
+ * cards; a phone held upright gets two rows so each card keeps a strip wide enough to read and hit.
+ */
+// Turning the phone changes how many rows the hand needs.
+window.addEventListener('resize', () => {
+  const rows = handRowCount(session.snapshot().viewModel.seats.bottom.cards?.length ?? 0);
+  if (rows !== shownHandRows && session.state.phase !== 'SETUP') render(session.snapshot());
+});
+
+function touchLayout(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+}
+
+function handRowCount(cardCount: number): 1 | 2 {
+  if (!touchLayout() || cardCount === 0) return 1;
+  const usable = Math.max(200, document.documentElement.clientWidth - 40);
+  return usable / cardCount < 22 ? 2 : 1;
 }
 
 function renderSeat(position: 'top' | 'left' | 'right' | 'bottom', snapshot: BrowserSessionSnapshot): string {
@@ -327,24 +356,30 @@ root.addEventListener('submit', async (event) => {
 });
 
 /**
- * Dragging the mouse (or a pen) across the hand selects every card it passes; starting on a selected card
- * clears them instead. Touch keeps scrolling the hand, which is wider than a phone screen.
+ * Dragging across the hand (mouse, pen or finger) selects every card it passes; starting on a selected
+ * card clears them instead. On touch screens the hand fits the screen and only lets the page scroll
+ * vertically, so a sideways slide is a selection.
  */
 let handDrag: { pointer: number; ids: string[]; base: string[]; from: number; to: number; moved: boolean } | null = null;
-let suppressCardClickUntil = 0;
+/** Set when a drag ends; swallows the click that follows it. Every new press starts clean. */
+let suppressCardClick = false;
 
 function handCardAt(x: number, y: number): HTMLElement | null {
   return document.elementFromPoint(x, y)?.closest<HTMLElement>('.hand-card[data-card-id]') ?? null;
 }
 
 root.addEventListener('pointerdown', (event) => {
-  if (event.pointerType === 'touch' || event.button !== 0 || !(event.target instanceof Element)) return;
+  suppressCardClick = false;
+  if (event.button !== 0 || !(event.target instanceof Element)) return;
   const card = event.target.closest<HTMLElement>('.hand-card[data-card-id]');
   if (card === null || card.hasAttribute('disabled')) return;
   const ids = [...root.querySelectorAll<HTMLElement>('.hand-card[data-card-id]')].map((element) => element.dataset.cardId ?? '');
   const from = ids.indexOf(card.dataset.cardId ?? '');
   if (from < 0) return;
-  event.preventDefault();
+  // A mouse press must not start a text selection; a touch must keep its default (vertical scrolling).
+  if (event.pointerType !== 'touch') event.preventDefault();
+  // A touch is captured by the card it started on; release it so moves over other cards hit-test normally.
+  if (card.hasPointerCapture(event.pointerId)) card.releasePointerCapture(event.pointerId);
   handDrag = { pointer: event.pointerId, ids, base: [...session.selectedCardIds], from, to: from, moved: false };
 });
 
@@ -361,7 +396,7 @@ window.addEventListener('pointermove', (event) => {
 function endHandDrag(event: PointerEvent): void {
   if (handDrag === null || handDrag.pointer !== event.pointerId) return;
   // The click that follows a drag must not toggle the card it ended on.
-  if (handDrag.moved) suppressCardClickUntil = performance.now() + 400;
+  suppressCardClick = handDrag.moved;
   handDrag = null;
 }
 window.addEventListener('pointerup', endHandDrag);
@@ -374,7 +409,10 @@ root.addEventListener('click', async (event) => {
   if (button === null || button.hasAttribute('disabled')) return;
   const action = button.dataset.action;
   if (action === 'toggle-card') {
-    if (performance.now() < suppressCardClickUntil) return;
+    if (suppressCardClick) {
+      suppressCardClick = false;
+      return;
+    }
     const cardId = button.dataset.cardId;
     if (cardId !== undefined) session.toggleCard(cardId);
     return;
