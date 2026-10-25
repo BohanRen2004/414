@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "types": ["node", "vitest/globals"]
   },
-  "include": ["client/assets/scripts/core/**/*.ts", "client/assets/scripts/ai/**/*.ts", "client/assets/scripts/app/**/*.ts", "client/assets/scripts/ui/table-view-model.ts", "tests/**/*.ts", "vitest.config.ts"]
+  "include": ["client/assets/scripts/core/**/*.ts", "client/assets/scripts/ai/**/*.ts", "client/assets/scripts/app/**/*.ts", "client/assets/scripts/ui/table-view-model.ts", "tests/**/*.ts", "server/cloud/wx-server-sdk.d.ts", "vitest.config.ts"]
 }

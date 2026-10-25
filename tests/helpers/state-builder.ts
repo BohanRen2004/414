@@ -1,12 +1,13 @@
 import { Card, PlayerId, Rank, Suit } from '../../client/assets/scripts/core/cards/card';
-import { createDoubleDeck, dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
+import { createDeck, DeckCount, dealFourPlayers } from '../../client/assets/scripts/core/cards/deck';
 import { CardGroup } from '../../client/assets/scripts/core/patterns/play-pattern';
-import { deriveSeed } from '../../client/assets/scripts/core/random/prng';
 import { GamePhase, GameState, GouChaChain, PlayerState, TrickState } from '../../client/assets/scripts/core/state/game-state';
 import { hasFlexibleFixtureSuit } from './cards';
 
 export interface StateFixture {
   readonly seed?: number;
+  /** Deck version of the fixture; defaults to two decks. Cards not in a hand or on the table count as played. */
+  readonly deckCount?: DeckCount;
   readonly phase: GamePhase;
   readonly currentPlayer: PlayerId | null;
   readonly hands: Readonly<Record<PlayerId, readonly Card[]>>;
@@ -88,7 +89,7 @@ function aliasGroup(
     const suit = requiredSuit(group, rank);
     const prior = tableIds.get(id);
     if (prior) {
-      if (!allowedExistingIds.has(id)) throw new Error(`Fixture card ID ${id} is reused outside the current-play aggregate`);
+      if (!allowedExistingIds.has(id)) throw new Error(`Fixture card ID ${id} is reused outside the gou-cha chain`);
       if (prior.rank !== rank || (suit !== null && prior.suit !== suit)) {
         throw new Error(`Fixture card ID ${id} conflicts with its prior rank or suit`);
       }
@@ -120,7 +121,8 @@ function playerState(playerId: PlayerId, hand: readonly Card[], finishOrder: rea
 }
 
 export function buildState(fixture: StateFixture): GameState {
-  const canonicalDeck = createDoubleDeck();
+  const deckCount = fixture.deckCount ?? 2;
+  const canonicalDeck = createDeck(deckCount);
   const unused = [...canonicalDeck];
   const hands = new Map<PlayerId, readonly Card[]>();
   const seenIds = new Set<string>();
@@ -194,12 +196,8 @@ export function buildState(fixture: StateFixture): GameState {
   const hasTrick = fixture.currentPlay !== undefined || fixture.gouCha !== undefined;
   let trick: TrickState | null = null;
   if (hasTrick) {
-    const currentPlay = fixture.currentPlay ?? {
-      cardIds: fixture.gouCha!.aggregateCardIds,
-      pattern: fixture.gouCha!.aggregatePattern,
-      playerId: fixture.gouCha!.holderId,
-      actionNumber: 1,
-    };
+    // During a chain the current play stays the base single; CHA/GOU cards are never merged into it.
+    const currentPlay = fixture.currentPlay ?? fixture.gouCha!.basePlay;
     trick = {
       currentPlay,
       holderId: fixture.holderId ?? fixture.gouCha?.holderId ?? currentPlay.playerId,
@@ -210,20 +208,18 @@ export function buildState(fixture: StateFixture): GameState {
   }
 
   const seed = fixture.seed ?? (fixture.phase === 'SETUP' ? null : 414);
-  const setupDeal = seed === null ? null : dealFourPlayers(seed);
+  const setupDeal = seed === null ? null : dealFourPlayers(seed, deckCount);
   const playedCardIds = [...tableIds.keys(), ...unused.map((card) => card.id)];
   const allStateCardIds = [...players.flatMap((player) => player.hand.map((card) => card.id)), ...playedCardIds];
   if (allStateCardIds.length !== canonicalDeck.length || new Set(allStateCardIds).size !== canonicalDeck.length) {
     throw new Error('Fixture card IDs do not form a unique complete physical deck');
   }
   const state: GameState = {
-    rulesVersion: '1.0.0',
+    rulesVersion: '1.1.0',
     phase: fixture.phase,
     rootSeed: seed,
-    randomState: setupDeal === null ? null : {
-      deal: setupDeal.dealStateAfterSetup,
-      ai: deriveSeed(seed!, 'AI'),
-    },
+    deckCount: fixture.phase === 'SETUP' ? null : deckCount,
+    randomState: setupDeal === null ? null : { deal: setupDeal.dealStateAfterSetup },
     firstPlayer: fixture.phase === 'SETUP' ? null : 0,
     players,
     currentPlayer: fixture.currentPlayer,

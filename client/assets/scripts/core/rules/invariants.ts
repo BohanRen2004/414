@@ -1,5 +1,7 @@
 import { PlayerId } from '../cards/card';
+import { deckSize, isDeckCount } from '../cards/deck';
 import { GameState } from '../state/game-state';
+import { gouChaCardIds } from './goucha';
 import { buildResult } from './results';
 
 export type InvariantCode =
@@ -20,9 +22,13 @@ function assertCardConservation(state: GameState): void {
     const setupIsEmpty = state.players.every((player) => player.hand.length === 0)
       && state.playedCardIds.length === 0;
     if (!setupIsEmpty) fail('CARD_TOTAL', 'SETUP must not contain dealt cards');
+    if (state.deckCount !== null) fail('CARD_TOTAL', 'SETUP has no deck count until START_GAME chooses one');
     return;
   }
 
+  if (!isDeckCount(state.deckCount)) {
+    fail('CARD_TOTAL', `a dealt game needs a deck count of 1 or 2, found ${String(state.deckCount)}`);
+  }
   const cardIds = [
     ...state.players.flatMap((player) => player.hand.map((card) => card.id)),
     ...state.playedCardIds,
@@ -32,8 +38,12 @@ function assertCardConservation(state: GameState): void {
     if (seen.has(id)) fail('CARD_DUPLICATED', `physical card ID ${id} appears more than once`);
     seen.add(id);
   }
-  if (cardIds.length !== 108) {
-    fail('CARD_TOTAL', `expected 108 cards across hands and played area, found ${cardIds.length}`);
+  const deckCount = state.deckCount;
+  const foreign = state.players.flatMap((player) => player.hand).find((card) => card.deckIndex >= deckCount);
+  if (foreign !== undefined) fail('CARD_TOTAL', `card ${foreign.id} belongs to deck ${foreign.deckIndex + 1} of a ${deckCount}-deck game`);
+  const expected = deckSize(state.deckCount);
+  if (cardIds.length !== expected) {
+    fail('CARD_TOTAL', `expected ${expected} cards across hands and played area, found ${cardIds.length}`);
   }
 }
 
@@ -107,47 +117,35 @@ function assertPhaseAndTrick(state: GameState): void {
     if (trick === null || chain === null || chain === undefined || trick.holderId !== chain.holderId) {
       fail('PHASE_TRICK_MISMATCH', 'GOUCHA_QUERY requires a matching active chain');
     }
-    const expectedPattern = chain.additions.length === 0 ? 'SINGLE' : 'N_OF_KIND_BOMB';
-    const expectedCardIds = [...chain.basePlay.cardIds, ...chain.additions.flatMap((addition) => addition.cardIds)];
-    const expectedNextAddition = chain.additions.length === 0 || chain.additions.length % 2 === 0 ? 'CHA' : 'GOU';
-    const invalidAddition = chain.additions.some((addition, index) =>
+    const base = chain.basePlay;
+    // holders[i] held the chain when addition i was made; nobody may add to their own cards.
+    const holders = [base.playerId, ...chain.additions.map((addition) => addition.playerId)];
+    const invalidAddition = chain.additions.length > 4 || chain.additions.some((addition, index) =>
       addition.addition !== (index % 2 === 0 ? 'CHA' : 'GOU')
-      || addition.cardIds.length !== (addition.addition === 'CHA' ? 2 : 1),
-    );
-    const chainIds = [...chain.basePlay.cardIds, ...chain.additions.flatMap((addition) => addition.cardIds)];
-    if (chain.basePlay.pattern.kind !== 'SINGLE'
-      || chain.basePlay.pattern.rank !== chain.rank
-      || chain.aggregatePattern.kind !== expectedPattern
+      || addition.cardIds.length !== (addition.addition === 'CHA' ? 2 : 1)
+      || addition.playerId === holders[index]);
+    const chainIds = gouChaCardIds(chain);
+    if (base.pattern.kind !== 'SINGLE'
+      || base.pattern.rank !== chain.rank
       || invalidAddition
+      || chain.holderId !== holders[holders.length - 1]
       || new Set(chainIds).size !== chainIds.length
       || chainIds.some((id) => !state.playedCardIds.includes(id))
-      || chain.aggregateCardIds.length !== expectedCardIds.length
-      || chain.aggregateCardIds.some((id, index) => id !== expectedCardIds[index])
-      || chain.nextAddition !== expectedNextAddition
+      || chain.nextAddition !== (chain.additions.length % 2 === 0 ? 'CHA' : 'GOU')
       || state.currentPlayer === chain.holderId
       || chain.queryCursor !== state.currentPlayer
-      || trick.nextResponder !== state.currentPlayer
-      || (chain.aggregatePattern.kind === 'SINGLE' && chain.aggregatePattern.rank !== chain.rank)
-      || (chain.aggregatePattern.kind === 'N_OF_KIND_BOMB'
-        && (chain.aggregatePattern.rank !== chain.rank || chain.aggregatePattern.count !== chain.aggregateCardIds.length))) {
-      fail('PHASE_TRICK_MISMATCH', 'gou-cha aggregate pattern does not match its stage or card count');
+      || trick.nextResponder !== state.currentPlayer) {
+      fail('PHASE_TRICK_MISMATCH', 'gou-cha chain does not match its additions, holder, or query');
     }
-    if (trick.currentPlay.pattern.kind !== chain.aggregatePattern.kind
-      || trick.currentPlay.cardIds.some((id, index) => id !== chain.aggregateCardIds[index])
-      || trick.currentPlay.cardIds.length !== chain.aggregateCardIds.length
-      || trick.currentPlay.playerId !== chain.holderId) {
-      fail('PHASE_TRICK_MISMATCH', 'trick current play does not mirror the gou-cha aggregate');
-    }
-    if (trick.currentPlay.pattern.kind === 'SINGLE'
-      && chain.aggregatePattern.kind === 'SINGLE'
-      && trick.currentPlay.pattern.rank !== chain.aggregatePattern.rank) {
-      fail('PHASE_TRICK_MISMATCH', 'trick single rank does not mirror the gou-cha aggregate');
-    }
-    if (trick.currentPlay.pattern.kind === 'N_OF_KIND_BOMB'
-      && chain.aggregatePattern.kind === 'N_OF_KIND_BOMB'
-      && (trick.currentPlay.pattern.rank !== chain.aggregatePattern.rank
-        || trick.currentPlay.pattern.count !== chain.aggregatePattern.count)) {
-      fail('PHASE_TRICK_MISMATCH', 'trick bomb does not mirror the gou-cha aggregate');
+    // CHA and GOU are actions, not a pattern: the current play stays exactly the base single.
+    const play = trick.currentPlay;
+    if (play.pattern.kind !== 'SINGLE'
+      || play.pattern.rank !== chain.rank
+      || play.playerId !== base.playerId
+      || play.actionNumber !== base.actionNumber
+      || play.cardIds.length !== base.cardIds.length
+      || play.cardIds.some((id, index) => id !== base.cardIds[index])) {
+      fail('PHASE_TRICK_MISMATCH', 'trick current play must remain the gou-cha base single');
     }
     return;
   }

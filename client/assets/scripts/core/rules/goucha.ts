@@ -4,7 +4,7 @@ import { GameAction } from '../state/game-action';
 import { GameEvent } from '../state/game-event';
 import { GameState, GouChaChain, PlayerState, PublicActionRecord, TrickState } from '../state/game-state';
 import { RuleError, ruleError } from '../state/rule-error';
-import { active, completeIfOneActive, finishEvents, nextActivePlayer, recordFinish } from './normal-trick';
+import { active, completeIfOneActive, finishEvents, nextActivePlayer, nextLeadPlayer, recordFinish } from './normal-trick';
 import type { ActionResult } from './reducer';
 
 function requiredCount(addition: 'CHA' | 'GOU'): 2 | 1 {
@@ -36,27 +36,28 @@ export function canAddGouCha(state: GameState, playerId: PlayerId): boolean {
     && eligible(state, chain, playerId);
 }
 
-function aggregatePlay(chain: GouChaChain): CardGroup {
-  const latestAddition = chain.additions[chain.additions.length - 1];
-  return {
-    cardIds: [...chain.aggregateCardIds],
-    pattern: chain.aggregatePattern,
-    playerId: chain.holderId,
-    actionNumber: latestAddition?.actionNumber ?? chain.basePlay.actionNumber,
-  };
+/** Every card the chain has put on the table, in contribution order. For display only: it is never compared. */
+export function gouChaCardIds(chain: GouChaChain): string[] {
+  return [...chain.basePlay.cardIds, ...chain.additions.flatMap((addition) => addition.cardIds)];
 }
 
+/**
+ * Stop asking. A single nobody CHA'd never became a chain, so ordinary responding to it continues.
+ * Once a CHA has happened the chain is dead (死岔/死勾): nobody may beat or answer it, the trick ends at once,
+ * and the last contributor leads next, lending the lead exactly as an ordinary trick winner would (借光).
+ */
 function closeChain(state: GameState, chain: GouChaChain): GameState {
-  const trick = state.trick!;
-  const currentPlay = chain.additions.length === 0 ? chain.basePlay : aggregatePlay(chain);
+  if (chain.additions.length > 0) {
+    return { ...state, phase: 'FREE_LEAD', currentPlayer: nextLeadPlayer(state.players, chain.holderId), trick: null };
+  }
   const nextResponder = nextActivePlayer(state.players, chain.holderId);
   return {
     ...state,
     phase: 'RESPONDING',
     currentPlayer: nextResponder,
     trick: {
-      ...trick,
-      currentPlay,
+      ...state.trick!,
+      currentPlay: chain.basePlay,
       holderId: chain.holderId,
       nextResponder,
       passedPlayerIds: [],
@@ -65,7 +66,7 @@ function closeChain(state: GameState, chain: GouChaChain): GameState {
   };
 }
 
-/** Select the next eligible player, or return to ordinary response after a complete scan. */
+/** Select the next eligible player; after a complete scan, close the chain (see closeChain). */
 export function advanceGouChaQuery(state: GameState): GameState {
   const chain = state.trick?.gouCha;
   if (chain === null || chain === undefined) return state;
@@ -94,8 +95,6 @@ export function maybeStartGouCha(state: GameState, base: CardGroup): GameState {
     rank: pattern.rank,
     basePlay: base,
     additions: [],
-    aggregateCardIds: [...base.cardIds],
-    aggregatePattern: pattern,
     holderId,
     nextAddition: 'CHA',
     queryCursor: holderId,
@@ -120,9 +119,11 @@ function appendAction(
   };
 }
 
+/** A query moved on, a chain without CHA reopened ordinary response, or a dead chain reset the trick. */
 function transitionEvents(state: GameState): GameEvent[] {
   if (state.phase === 'ROUND_RESULT' || state.currentPlayer === null) return [];
-  return [{ kind: 'TURN_CHANGED', playerId: state.currentPlayer }];
+  const turn: GameEvent = { kind: 'TURN_CHANGED', playerId: state.currentPlayer };
+  return state.phase === 'FREE_LEAD' ? [{ kind: 'TRICK_RESET' }, turn] : [turn];
 }
 
 function error(code: RuleError['code'], context: RuleError['context'] = {}): ActionResult {
@@ -175,13 +176,10 @@ export function addGouCha(
     cardIds: [...action.cardIds],
     actionNumber: state.actionNumber,
   } as const;
-  const aggregateCardIds = [...chain.aggregateCardIds, ...action.cardIds];
   const nextAddition = action.addition === 'CHA' ? 'GOU' : 'CHA';
   const nextChain: GouChaChain = {
     ...chain,
     additions: [...chain.additions, addition],
-    aggregateCardIds,
-    aggregatePattern: { kind: 'N_OF_KIND_BOMB', rank: chain.rank, count: aggregateCardIds.length },
     holderId: action.playerId,
     nextAddition,
     queryCursor: action.playerId,
@@ -194,9 +192,9 @@ export function addGouCha(
     players: updatedPlayers,
     currentPlayer: null,
     playedCardIds: [...state.playedCardIds, ...action.cardIds],
+    // The current play stays the base single: CHA/GOU cards join the chain, not a merged pattern.
     trick: {
       ...state.trick!,
-      currentPlay: aggregatePlay(nextChain),
       holderId: action.playerId,
       passedPlayerIds: [],
       gouCha: nextChain,
@@ -216,20 +214,22 @@ export function addGouCha(
   return { ok: true, state: next, events };
 }
 
+/**
+ * A decline is private: who was asked and who declined is never public, so it adds no history
+ * record and takes no action number (a gap in the numbering would reveal it).
+ */
 export function declineGouCha(state: GameState, playerId: PlayerId): ActionResult {
   const chain = state.trick?.gouCha;
   if (state.phase !== 'GOUCHA_QUERY' || chain === null || chain === undefined) return error('WRONG_PHASE');
   if (playerId === chain.holderId) return error('SELF_GOUCHA_FORBIDDEN');
   if (state.currentPlayer !== playerId) return error('NOT_CURRENT_PLAYER', { playerId });
 
-  const actionData = appendAction(state, playerId, 'DECLINE_GOUCHA', []);
   const declinedChain = {
     ...chain,
     declinedPlayerIds: [...chain.declinedPlayerIds, playerId],
   };
   const declined: GameState = {
     ...state,
-    ...actionData,
     currentPlayer: null,
     trick: { ...state.trick!, gouCha: declinedChain },
   };

@@ -176,12 +176,20 @@ main { width: min(1420px, 100%); min-height: calc(100vh - 76px); margin: auto; p
 .hand-hint { color: #87968d; font-size: 10px; }
 .hand-hint i { padding: 0 4px; color: #5d6b62; font-style: normal; }
 .hand-viewport { width: 100%; min-height: 116px; overflow-x: auto; overflow-y: hidden; padding: 5px 6px 12px; scrollbar-color: #60776a #1a2922; scrollbar-width: thin; }
-.hand-track { min-width: max-content; display: flex; align-items: end; padding: 0 8px 2px 4px; }
+.hand-track { min-width: max-content; display: flex; align-items: end; padding: 0 8px 2px 4px; user-select: none; -webkit-user-select: none; }
 .hand-card { position: relative; z-index: 1; width: clamp(47px, 4.55vw, 62px); height: clamp(70px, 6.7vw, 92px); flex: 0 0 auto; margin-right: clamp(-18px, -1.1vw, -11px); padding: 0; border: 0; border-radius: 7px; background: transparent; cursor: pointer; transition: transform .16s ease, filter .16s ease; }
-.hand-card:hover:not(:disabled) { z-index: 5; transform: translateY(-8px); }
+@media (hover: hover) { .hand-card:hover:not(:disabled) { z-index: 5; transform: translateY(-8px); } }
 .hand-card.is-picked { z-index: 4; transform: translateY(-13px); }
 .hand-card.is-ineligible { filter: saturate(.3) brightness(.58); }
 .hand-card .playing-card { width: 100%; height: 100%; }
+.hand-row { display: flex; align-items: end; }
+/* Touch screens: the hand fits the width (two rows on a phone held upright) and a sideways slide selects. */
+.hand-track.is-fitted { min-width: 0; width: 100%; flex-direction: column; align-items: stretch; gap: 16px; padding: 8px 4px 2px; touch-action: pan-y; }
+.hand-track.is-fitted .hand-card { width: auto; flex: 0 1 48px; min-width: 0; margin-right: 0; }
+.hand-track.is-fitted .hand-card:last-child { flex-shrink: 0; }
+.hand-track.is-fitted .hand-card .playing-card { width: 48px; }
+/* A raised card must not cover the narrow strip of the card after it. */
+.hand-track.is-fitted .hand-card.is-picked { z-index: 1; }
 .empty-hand { padding: 25px 10px; color: var(--muted); font-size: 12px; }
 
 .playing-card { position: relative; width: 58px; height: 82px; display: inline-flex; flex: 0 0 auto; overflow: hidden; flex-direction: column; align-items: center; justify-content: center; color: #23312c; border: 1px solid #d6dfd5; border-radius: 6px; background: linear-gradient(150deg, #f6f6ed, #e7ece2 70%, #dbe4db); box-shadow: 0 7px 14px rgb(0 0 0 / 17%), inset 0 1px rgb(255 255 255 / 90%); }
@@ -211,7 +219,9 @@ main { width: min(1420px, 100%); min-height: calc(100vh - 76px); margin: auto; p
 .goucha-prompt .button { min-height: 36px; padding: 0 11px; font-size: 10px; }
 
 .page-footer { display: flex; justify-content: space-between; padding: 14px 2px 0; color: #718078; font-size: 8px; letter-spacing: .1em; }
-.modal-scrim { position: fixed; z-index: 20; inset: 0; display: grid; place-items: center; padding: 24px; background: rgb(4 10 8 / 76%); backdrop-filter: blur(10px); }
+.modal-scrim { position: fixed; z-index: 20; inset: 0; display: flex; flex-direction: column; align-items: center; overflow-y: auto; padding: 24px; background: rgb(4 10 8 / 76%); backdrop-filter: blur(10px); }
+/* Auto margins centre the card when it fits and let it scroll from the top when it does not (short landscape phones). */
+.modal-scrim > * { flex: none; margin-block: auto; }
 .start-card, .result-card, .help-card { position: relative; width: min(470px, 100%); padding: 36px; border: 1px solid rgb(217 230 217 / 13%); border-radius: 10px; background: linear-gradient(145deg, #1c2a24, #131f1b); box-shadow: 0 30px 100px rgb(0 0 0 / 50%); }
 .start-card { padding: 42px 44px 26px; }
 .hero-mark { display: flex; align-items: center; gap: 2px; margin-top: 27px; color: #e9f0e8; font-size: 47px; font-weight: 700; letter-spacing: -.14em; }
@@ -219,8 +229,19 @@ main { width: min(1420px, 100%); min-height: calc(100vh - 76px); margin: auto; p
 .start-card h1, .result-card h2, .help-card h2 { margin: 4px 0 9px; color: #eef4ec; font-size: 30px; font-weight: 550; letter-spacing: -.055em; }
 .start-card > p, .help-card > p { margin: 0; color: #a7b4aa; font-size: 12px; line-height: 1.8; }
 .seed-form { display: grid; gap: 10px; margin-top: 27px; }
-.seed-form label { display: flex; justify-content: space-between; align-items: end; color: #d8e1d7; font-size: 11px; font-weight: 650; }
-.seed-form label span { color: #84958a; font-size: 9px; font-weight: 400; }
+.field-label { display: flex; justify-content: space-between; align-items: end; color: #d8e1d7; font-size: 11px; font-weight: 650; }
+.field-label span { color: #84958a; font-size: 9px; font-weight: 400; }
+.deck-choice { display: grid; gap: 10px; margin-bottom: 6px; }
+.deck-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.deck-option { position: relative; cursor: pointer; }
+.deck-option input { position: absolute; opacity: 0; pointer-events: none; }
+.deck-option-body { display: grid; gap: 5px; padding: 11px 13px; border: 1px solid var(--line-strong); border-radius: 5px; background: rgb(5 13 10 / 28%); transition: border-color .15s ease, background .15s ease; }
+.deck-option-body b { color: #d8e1d7; font-size: 13px; font-weight: 650; }
+.deck-option-body small { color: #84958a; font-size: 9px; font-variant-numeric: tabular-nums; }
+.deck-option:hover .deck-option-body { border-color: rgb(224 235 215 / 28%); }
+.deck-option input:checked + .deck-option-body { border-color: rgb(168 217 189 / 55%); background: rgb(168 217 189 / 8%); }
+.deck-option input:checked + .deck-option-body b { color: var(--mint); }
+.deck-option input:focus-visible + .deck-option-body { outline: 2px solid var(--mint); outline-offset: 2px; }
 .seed-entry { height: 45px; display: flex; align-items: center; gap: 9px; padding: 0 13px; border: 1px solid var(--line-strong); border-radius: 5px; background: rgb(5 13 10 / 28%); }
 .seed-entry span { color: #82988a; }
 .seed-entry input { width: 100%; color: var(--ink); border: 0; outline: none; background: transparent; font-variant-numeric: tabular-nums; letter-spacing: .09em; }
@@ -253,77 +274,176 @@ main { width: min(1420px, 100%); min-height: calc(100vh - 76px); margin: auto; p
 }
 
 @media (max-width: 960px) {
-  .topbar { grid-template-columns: 1fr auto; height: 68px; }
-  .topbar-center { display: none; }
-  main { min-height: calc(100vh - 68px); padding-top: 23px; }
-  .table-grid { grid-template-columns: minmax(120px, 1fr) minmax(300px, 2fr) minmax(120px, 1fr); gap: 0 8px; padding: 8px 10px 17px; }
-  .player-seat { min-width: 120px; gap: 7px; padding: 9px 6px; }
-  .seat-avatar { width: 32px; height: 32px; flex-basis: 32px; font-size: 8px; }
-  .seat-heading strong { font-size: 10px; }
-  .team-tag { display: none; }
-  .seat-meta { font-size: 8px; }
-  .hidden-hand { transform: scale(.8); transform-origin: right center; }
-  .center-table { min-height: 300px; }
-  .hand-card { width: 52px; height: 77px; margin-right: -13px; }
-  .playing-card { width: 52px; height: 75px; }
-  .is-compact { width: 42px; height: 61px; }
-  .hand-hint { font-size: 9px; }
+  /* Not on phones: they get the landscape table below. */
+  :where(html:not(.phone)) .topbar { grid-template-columns: 1fr auto; height: 68px; }
+  :where(html:not(.phone)) .topbar-center { display: none; }
+  :where(html:not(.phone)) main { min-height: calc(100vh - 68px); padding-top: 23px; }
+  :where(html:not(.phone)) .table-grid { grid-template-columns: minmax(120px, 1fr) minmax(300px, 2fr) minmax(120px, 1fr); gap: 0 8px; padding: 8px 10px 17px; }
+  :where(html:not(.phone)) .player-seat { min-width: 120px; gap: 7px; padding: 9px 6px; }
+  :where(html:not(.phone)) .seat-avatar { width: 32px; height: 32px; flex-basis: 32px; font-size: 8px; }
+  :where(html:not(.phone)) .seat-heading strong { font-size: 10px; }
+  :where(html:not(.phone)) .team-tag { display: none; }
+  :where(html:not(.phone)) .seat-meta { font-size: 8px; }
+  :where(html:not(.phone)) .hidden-hand { transform: scale(.8); transform-origin: right center; }
+  :where(html:not(.phone)) .center-table { min-height: 300px; }
+  :where(html:not(.phone)) .hand-card { width: 52px; height: 77px; margin-right: -13px; }
+  :where(html:not(.phone)) .playing-card { width: 52px; height: 75px; }
+  :where(html:not(.phone)) .is-compact { width: 42px; height: 61px; }
+  :where(html:not(.phone)) .hand-hint { font-size: 9px; }
 }
 
 @media (max-width: 680px) {
-  .topbar { height: 62px; padding: 0 15px; }
-  .brand-copy small { font-size: 10px; }
-  .top-actions { gap: 6px; }
-  .seed-chip { padding: 7px; font-size: 8px; }
-  .new-game-top { min-height: 31px; padding: 0 8px; font-size: 9px; }
-  .icon-button { width: 31px; height: 31px; }
-  main { min-height: calc(100vh - 62px); padding: 20px 12px 12px; }
-  .table-heading { margin-bottom: 12px; }
-  .table-heading h2 { font-size: 19px; }
-  .round-progress > span { font-size: 8px; }
-  .table-grid { grid-template-areas: "top top" "left right" "center center" "hand hand"; grid-template-columns: 1fr 1fr; grid-template-rows: 64px 64px minmax(260px, auto) auto; gap: 1px 5px; padding: 9px 8px 12px; border-radius: 8px; }
-  .seat-top { min-width: 185px; }
-  .seat-left { justify-self: end; }
-  .seat-right { justify-self: start; }
-  .player-seat { min-width: 0; width: fit-content; padding: 6px; }
-  .seat-avatar { width: 29px; height: 29px; flex-basis: 29px; }
-  .seat-meta { margin-top: 3px; }
-  .hidden-hand { display: none; }
-  .center-table { width: 100%; min-height: 260px; border-radius: 50% / 36%; }
-  .table-topline { top: 21px; }
-  .hand-zone { padding: 14px 0 0; }
-  .hand-header { align-items: center; margin-bottom: 7px; }
-  .hand-header h3 { font-size: 14px; }
-  .hand-hint { max-width: 48%; text-align: right; line-height: 1.5; }
-  .hand-viewport { min-height: 108px; margin: 0 -4px; padding: 6px 3px 10px; }
-  .hand-card { width: 48px; height: 71px; margin-right: -12px; }
-  .playing-card { width: 48px; height: 70px; }
-  .card-corner { top: 4px; left: 5px; }
-  .card-corner strong { font-size: 11px; }
-  .card-center-suit { font-size: 21px; }
-  .is-compact { width: 41px; height: 59px; }
-  .hand-controls { min-height: 91px; grid-template-columns: 1fr; grid-template-rows: auto auto auto; gap: 2px; padding-top: 8px; }
-  .selection-caption { min-height: 15px; justify-content: space-between; font-size: 9px; }
-  .play-actions { width: 100%; grid-column: 1; grid-row: 2; justify-content: flex-end; }
-  .play-actions .button { flex: 1; min-width: 0; min-height: 37px; }
-  .play-actions .button-primary { flex: 1.15; min-width: 0; }
-  .goucha-prompt { grid-column: 1; grid-row: 2; justify-content: flex-end; }
-  .goucha-prompt > div { flex: 1; }
-  .goucha-prompt .button { min-width: 60px; }
-  .inline-error { min-height: 14px; font-size: 9px; }
-  .page-footer { padding-top: 11px; font-size: 7px; }
-  .start-card, .result-card, .help-card { padding: 28px 23px 22px; }
-  .hero-mark { margin-top: 20px; font-size: 39px; }
-  .hero-mark i { font-size: 34px; }
-  .start-card h1 { font-size: 27px; }
-  .seed-form label { display: grid; gap: 5px; }
-  .result-card h2 { font-size: 23px; }
-  .result-order li { grid-template-columns: 30px 1fr auto; gap: 8px; padding: 9px; }
-  .result-order i { font-size: 7px; }
-  .action-history { bottom: 13px; gap: 8px; }
-  .action-history li { font-size: 7px; }
+  /* Not on phones: they get the landscape table below. */
+  :where(html:not(.phone)) .topbar { height: 62px; padding: 0 15px; }
+  :where(html:not(.phone)) .brand-copy small { font-size: 10px; }
+  :where(html:not(.phone)) .top-actions { gap: 6px; }
+  :where(html:not(.phone)) .seed-chip { padding: 7px; font-size: 8px; }
+  :where(html:not(.phone)) .new-game-top { min-height: 31px; padding: 0 8px; font-size: 9px; }
+  :where(html:not(.phone)) .icon-button { width: 31px; height: 31px; }
+  :where(html:not(.phone)) main { min-height: calc(100vh - 62px); padding: 20px 12px 12px; }
+  :where(html:not(.phone)) .table-heading { margin-bottom: 12px; }
+  :where(html:not(.phone)) .table-heading h2 { font-size: 19px; }
+  :where(html:not(.phone)) .round-progress > span { font-size: 8px; }
+  :where(html:not(.phone)) .table-grid { grid-template-areas: "top top" "left right" "center center" "hand hand"; grid-template-columns: 1fr 1fr; grid-template-rows: 64px 64px minmax(260px, auto) auto; gap: 1px 5px; padding: 9px 8px 12px; border-radius: 8px; }
+  :where(html:not(.phone)) .seat-top { min-width: 185px; }
+  :where(html:not(.phone)) .seat-left { justify-self: end; }
+  :where(html:not(.phone)) .seat-right { justify-self: start; }
+  :where(html:not(.phone)) .player-seat { min-width: 0; width: fit-content; padding: 6px; }
+  :where(html:not(.phone)) .seat-avatar { width: 29px; height: 29px; flex-basis: 29px; }
+  :where(html:not(.phone)) .seat-meta { margin-top: 3px; }
+  :where(html:not(.phone)) .hidden-hand { display: none; }
+  :where(html:not(.phone)) .center-table { width: 100%; min-height: 260px; border-radius: 50% / 36%; }
+  :where(html:not(.phone)) .table-topline { top: 21px; }
+  :where(html:not(.phone)) .hand-zone { padding: 14px 0 0; }
+  :where(html:not(.phone)) .hand-header { align-items: center; margin-bottom: 7px; }
+  :where(html:not(.phone)) .hand-header h3 { font-size: 14px; }
+  :where(html:not(.phone)) .hand-hint { max-width: 48%; text-align: right; line-height: 1.5; }
+  :where(html:not(.phone)) .hand-viewport { min-height: 108px; margin: 0 -4px; padding: 6px 3px 10px; }
+  :where(html:not(.phone)) .hand-card { width: 48px; height: 71px; margin-right: -12px; }
+  :where(html:not(.phone)) .playing-card { width: 48px; height: 70px; }
+  :where(html:not(.phone)) .card-corner { top: 4px; left: 5px; }
+  :where(html:not(.phone)) .card-corner strong { font-size: 11px; }
+  :where(html:not(.phone)) .card-center-suit { font-size: 21px; }
+  :where(html:not(.phone)) .is-compact { width: 41px; height: 59px; }
+  :where(html:not(.phone)) .hand-controls { min-height: 91px; grid-template-columns: 1fr; grid-template-rows: auto auto auto; gap: 2px; padding-top: 8px; }
+  :where(html:not(.phone)) .selection-caption { min-height: 15px; justify-content: space-between; font-size: 9px; }
+  :where(html:not(.phone)) .play-actions { width: 100%; grid-column: 1; grid-row: 2; justify-content: flex-end; }
+  :where(html:not(.phone)) .play-actions .button { flex: 1; min-width: 0; min-height: 37px; }
+  :where(html:not(.phone)) .play-actions .button-primary { flex: 1.15; min-width: 0; }
+  :where(html:not(.phone)) .goucha-prompt { grid-column: 1; grid-row: 2; justify-content: flex-end; }
+  :where(html:not(.phone)) .goucha-prompt > div { flex: 1; }
+  :where(html:not(.phone)) .goucha-prompt .button { min-width: 60px; }
+  :where(html:not(.phone)) .inline-error { min-height: 14px; font-size: 9px; }
+  :where(html:not(.phone)) .page-footer { padding-top: 11px; font-size: 7px; }
+  :where(html:not(.phone)) .start-card, :where(html:not(.phone)) .result-card, :where(html:not(.phone)) .help-card { padding: 28px 23px 22px; }
+  :where(html:not(.phone)) .hero-mark { margin-top: 20px; font-size: 39px; }
+  :where(html:not(.phone)) .hero-mark i { font-size: 34px; }
+  :where(html:not(.phone)) .start-card h1 { font-size: 27px; }
+  :where(html:not(.phone)) .field-label { display: grid; gap: 5px; }
+  :where(html:not(.phone)) .deck-option-body { padding: 10px 11px; }
+  :where(html:not(.phone)) .result-card h2 { font-size: 23px; }
+  :where(html:not(.phone)) .result-order li { grid-template-columns: 30px 1fr auto; gap: 8px; padding: 9px; }
+  :where(html:not(.phone)) .result-order i { font-size: 7px; }
+  :where(html:not(.phone)) .action-history { bottom: 13px; gap: 8px; }
+  :where(html:not(.phone)) .action-history li { font-size: 7px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+@media (max-height: 500px) {
+  .modal-scrim { padding-block: 12px; }
+  .start-card { padding: 22px 30px 16px; }
+  .hero-mark { margin-top: 8px; }
+  .start-card h1 { font-size: 24px; }
+  .start-foot { margin-top: 12px; padding-top: 10px; }
+}
+
+/*
+ * Phones: one landscape screen, like a card game app. The page never scrolls; the hand runs along the
+ * bottom with the buttons above it. Held upright, the whole app is turned a quarter (html.rotated), so it
+ * is always played sideways. --app-w/--app-h are the app's own width and height, set from script.
+ */
+html.phone, html.phone body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+html.phone body { min-height: 0; }
+html.phone #app { width: var(--app-w); height: var(--app-h); overflow: hidden; }
+html.phone.rotated #app { position: fixed; top: 0; left: 0; transform-origin: top left; transform: translateX(var(--app-h)) rotate(90deg); }
+html.phone .app-frame { height: 100%; min-height: 0; display: flex; flex-direction: column; padding: 0 var(--safe-right) 0 var(--safe-left); }
+html.phone .topbar { height: 38px; flex: none; grid-template-columns: 1fr auto; gap: 10px; padding: 0 12px; }
+html.phone .topbar-center, html.phone .brand-copy small { display: none; }
+html.phone .brand { gap: 8px; }
+html.phone .brand-mark { font-size: 16px; }
+html.phone .top-actions { gap: 6px; }
+html.phone .seed-chip { padding: 5px 7px; font-size: 8px; }
+html.phone .icon-button { width: 28px; height: 28px; font-size: 12px; }
+html.phone .new-game-top { min-height: 28px; padding: 0 9px; font-size: 10px; }
+html.phone main { width: 100%; flex: 1; min-height: 0; padding: 4px 8px 6px; }
+html.phone .table-heading, html.phone .page-footer { display: none; }
+html.phone .table-grid { min-height: 0; grid-template-areas: "left top right" "left center right" "hand hand hand"; grid-template-columns: 92px minmax(0, 1fr) 92px; grid-template-rows: 32px minmax(0, 1fr) auto; gap: 2px 8px; padding: 2px 8px 4px; border-radius: 8px; }
+html.phone .player-seat { min-width: 0; padding: 4px 6px; gap: 6px; }
+html.phone .seat-top { min-width: 0; padding: 2px 8px; }
+html.phone .seat-left, html.phone .seat-right { justify-self: center; flex-direction: column; text-align: center; gap: 4px; }
+html.phone .seat-left .seat-heading, html.phone .seat-right .seat-heading, html.phone .seat-left .seat-meta, html.phone .seat-right .seat-meta { justify-content: center; }
+html.phone .seat-avatar { width: 28px; height: 28px; flex-basis: 28px; font-size: 8px; }
+html.phone .seat-top .seat-avatar { width: 24px; height: 24px; flex-basis: 24px; }
+html.phone .seat-heading strong { font-size: 11px; }
+html.phone .team-tag, html.phone .hidden-hand { display: none; }
+html.phone .seat-meta { margin-top: 2px; }
+html.phone .seat-top .seat-copy { display: flex; align-items: center; gap: 8px; }
+html.phone .seat-top .seat-meta { margin-top: 0; }
+html.phone .turn-pulse { top: 4px; right: 4px; }
+html.phone .center-table { height: 100%; min-height: 0; padding: 6px 12px; border-radius: 50% / 46%; }
+html.phone .center-table::before { inset: 6px; }
+html.phone .center-table::after { inset: 12px; }
+html.phone .table-topline, html.phone .action-history, html.phone .contribution-line { display: none; }
+html.phone .pattern-label { font-size: 15px; }
+html.phone .table-cards { margin: 5px 0 2px; }
+html.phone .table-cards .playing-card + .playing-card { margin-left: -14px; }
+html.phone .table-cards .is-compact { width: 36px; height: 52px; }
+html.phone .table-emblem { margin: 4px 0 2px; font-size: 18px; }
+html.phone .table-emblem i { font-size: 15px; }
+html.phone .holder-line { margin-top: 2px; font-size: 9px; }
+html.phone .turn-banner { margin-top: 5px; padding: 4px 10px; font-size: 10px; }
+html.phone .hand-zone { display: flex; flex-direction: column; padding: 0; border-top: 0; }
+html.phone .hand-header { display: none; }
+html.phone .hand-controls { order: -1; min-height: 0; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto; gap: 0 10px; margin: 0; padding: 2px 0 0; border-top: 0; }
+html.phone .selection-caption { font-size: 10px; }
+html.phone .inline-error { min-height: 0; font-size: 10px; }
+html.phone .play-actions { grid-column: 2; grid-row: 1 / 3; gap: 6px; }
+html.phone .play-actions .button, html.phone .goucha-prompt .button { min-width: 58px; min-height: 32px; padding: 0 10px; font-size: 11px; }
+html.phone .play-actions .button-primary { min-width: 72px; }
+html.phone .button kbd, html.phone .goucha-prompt .eyebrow { display: none; }
+html.phone .goucha-prompt { grid-column: 2; grid-row: 1 / 3; gap: 6px; }
+html.phone .goucha-prompt > div { gap: 1px; }
+html.phone .hand-viewport { min-height: 0; margin: 0; padding: 14px 0 0; overflow: visible; }
+html.phone .hand-track.is-fitted { padding: 0 2px; touch-action: none; }
+html.phone .hand-track.is-fitted .hand-card { height: 68px; flex-basis: 46px; }
+html.phone .hand-track.is-fitted .hand-card .playing-card { width: 46px; height: 68px; }
+html.phone .hand-card.is-picked { transform: translateY(-12px); }
+html.phone .card-corner { top: 4px; left: 4px; }
+html.phone .card-corner strong { font-size: 12px; }
+html.phone .card-corner i { font-size: 9px; }
+html.phone .card-center-suit { font-size: 19px; }
+html.phone .empty-hand { padding: 10px; font-size: 11px; }
+html.phone .modal-scrim { padding: 10px 16px; }
+html.phone .start-card, html.phone .result-card, html.phone .help-card { width: min(560px, 100%); padding: 16px 22px 14px; }
+html.phone .hero-mark { margin-top: 0; font-size: 30px; }
+html.phone .hero-mark i { font-size: 26px; }
+html.phone .start-card h1 { margin: 2px 0 4px; font-size: 20px; }
+html.phone .start-card > p { font-size: 11px; line-height: 1.6; }
+html.phone .seed-form { gap: 7px; margin-top: 10px; }
+html.phone .seed-entry { height: 38px; }
+html.phone .start-button { min-height: 40px; }
+html.phone .start-foot { margin-top: 8px; padding-top: 8px; }
+html.phone .result-card h2, html.phone .help-card h2 { margin-top: 4px; font-size: 20px; }
+html.phone .result-order li { padding: 6px 10px; }
+html.phone .result-actions { margin-top: 10px; }
+html.phone .rule-grid { margin: 10px 0; }
+/* The start card goes side by side on a landscape phone: title on the left, choices on the right. */
+html.phone .start-card { width: min(660px, 100%); display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.35fr); grid-template-rows: auto auto auto 1fr auto; column-gap: 24px; align-content: start; }
+html.phone .start-card > * { grid-column: 1; }
+html.phone .start-card .seed-form { grid-column: 2; grid-row: 1 / 6; margin-top: 0; }
+html.phone .start-card .start-foot { align-self: end; flex-direction: column; gap: 4px; }
+html.phone .deck-option-body { padding: 7px 10px; }
+html.phone .field-label span { display: none; }
