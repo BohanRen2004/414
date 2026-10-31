@@ -1,0 +1,49 @@
+## Query 2: Most Popular Stops by Trips that Include Stop — Indexing Analysis
+
+### Baseline (default indexes only)
+
+[Screenshot ①]
+
+Before we add any index, the tables only have their primary keys and the index on `stop_times.stop_id`. MySQL created this `stop_id` index automatically for the foreign key. The plan scans the small `stops` table (about 1,900 rows). For each stop, it uses the `stop_id` index to find the matching rows in `stop_times`. This step is a covering index lookup. InnoDB secondary indexes also store the primary key columns (`trip_id`, `stop_sequence`), so MySQL can read `trip_id` from the index and does not need to go to the table. The total cost is **49,736**.
+
+**Note on the two baselines.** During Design 1, MySQL dropped the automatic `stop_id` index (we explain why below). We rebuilt it and ran `ANALYZE TABLE` to refresh the statistics. After that, we ran the baseline again and got **75,032**.
+
+[Screenshot ③]
+
+The plan is exactly the same. Only the cost estimate for each `stop_id` lookup changed (from 5.39 to 20.1), because the statistics changed. To keep the comparison fair, we compare Design 1 with the first baseline (49,736). We compare Design 2 and Design 3 with the second baseline (75,032). This way, each design uses the same statistics as its baseline.
+
+### Design 1: `stop_times(stop_id, trip_id)`
+
+[Screenshot ②]
+
+Cost: **90,828** (baseline 49,736, about **83% worse**).
+
+We picked this index because `stop_id` is the join attribute and `trip_id` is used in `COUNT(DISTINCT)`. We expected a covering index to help. Instead, the cost went up a lot. With the new index, the optimizer changed the join order. It now scans the whole new index on `stop_times` (about 201,000 rows, cost 20,478). Then it looks up the matching stop in `stops` by primary key for every row. That is about 200,000 lookups instead of about 1,900. It also has to sort about 200,000 rows before grouping. The old plan was already a covering lookup, so this index added no real benefit. It only pushed the optimizer toward a worse plan. We also learned something during this test. MySQL silently drops the automatic foreign key index when a new index starts with the same column. Because of this, we had to recreate the `stop_id` index before MySQL let us drop Design 1.
+
+### Design 2: `stops(stop_name)`
+
+[Screenshot ④]
+
+Cost: **75,032** (baseline 75,032, **no change**).
+
+We picked `stop_name` because it appears in the `GROUP BY`. The plan is exactly the same as the baseline, and MySQL does not use `idx_q2_name` at all. The `GROUP BY` starts with `s.stop_id`, which is the primary key of `stops`. An index that starts with `stop_name` does not match this order, so it cannot help the grouping. There is also no `WHERE` filter on `stop_name`. On top of that, `stops` is a small table, and a full scan only costs 195.
+
+### Design 3: `stops(stop_name, stop_lat, stop_lon)`
+
+[Screenshot ⑤]
+
+Cost: **75,032** (baseline 75,032, **no change**).
+
+This composite index holds all the `GROUP BY` columns from `stops` (together with the primary key that InnoDB adds). MySQL does use it this time. The step "Table scan on s" becomes "Covering index scan on s using idx_q2_name_loc". However, the cost of this step stays at 195, and the total cost stays at 75,032. Reading 1,900 rows from an index costs about the same as reading them from the table. MySQL still has to sort by `stop_id`, because the index is ordered by `stop_name`. Most of the cost comes from the join and the aggregation over about 200,000 `stop_times` rows, and this index does not touch that part.
+
+### Final Index Design
+
+| Design | Index | Cost | Change |
+|---|---|---|---|
+| Baseline (1st) | default only | 49,736 | — |
+| Design 1 | `stop_times(stop_id, trip_id)` | 90,828 | +83% (worse) |
+| Baseline (2nd, after ANALYZE) | default only | 75,032 | — |
+| Design 2 | `stops(stop_name)` | 75,032 | 0% |
+| Design 3 | `stops(stop_name, stop_lat, stop_lon)` | 75,032 | 0% |
+
+We decided to keep the default indexes (the primary keys plus the automatic `stop_times.stop_id` index) and not add any new index for this query. None of the three designs lowered the cost. Design 1 made the cost 83% worse because it changed the join order. Designs 2 and 3 did not change the cost because `stops` is small and the expensive part of the query is the join with `stop_times`. The existing `stop_id` index already gives a covering lookup for both the join and `COUNT(DISTINCT trip_id)`. More indexes would only take more storage and slow down inserts and updates, with no gain for this query.
