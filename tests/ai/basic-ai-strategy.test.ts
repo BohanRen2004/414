@@ -398,12 +398,26 @@ describe('basic AI strategy: R6 go-out plan (收尾抢权)', () => {
     it.each([
       ['a bomb', [NINE, NINE, NINE, SIX]],
       ['a split bomb', [TWO, TWO, TWO, SIX]],
-    ] as const)('never takes over with %s for a go-out plan', (_label, hand) => {
-      // 9-9-9 and the 2s would each start a plan, but R3's bomb rule still holds over a teammate.
+    ] as const)('does not take over with %s when a beatable card would be left', (_label, hand) => {
+      // 9-9-9 and the 2s would each start a plan against an opponent, but the 6 left after them could be
+      // beaten, so over a teammate the bomb is kept.
       for (const deckCount of BOTH_VERSIONS) {
         const state = counted(deckCount, cards(...hand), calm(cards(NINE, TEN, JACK)), teammateFive());
         expect(decide(state).kind, `${deckCount} deck`).toBe('PASS');
       }
+    });
+
+    it.each(BOTH_VERSIONS)('bombs a teammate when that makes going out certain (%i deck)', (deckCount) => {
+      // Nothing but 9-9-9 tops the teammate's 5-6-7, and the 2 left after it cannot be beaten.
+      const straight = { cards: table(FIVE, SIX, SEVEN), holderId: 2 as const };
+      const state = counted(deckCount, cards(NINE, NINE, NINE, TWO), calm(cards(TEN, JACK, KING)), straight);
+      expect(decide(state).ranks).toEqual([NINE, NINE, NINE]);
+    });
+
+    it.each(BOTH_VERSIONS)('still does not bomb a teammate down to one card (%i deck)', (deckCount) => {
+      const straight = { cards: table(FIVE, SIX, SEVEN), holderId: 2 as const };
+      const state = counted(deckCount, cards(NINE, NINE, NINE, TWO), calm(cards(TEN)), straight);
+      expect(decide(state).kind).toBe('PASS');
     });
   });
 });

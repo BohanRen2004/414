@@ -275,8 +275,9 @@ function holderIsTeammate(observation: AiObservation): boolean {
 
 /**
  * R6 收尾抢权 (go-out plan): a play no opponent can beat (see opponentCanBeat), after which the rest of the hand
- * can be led out with at most one play that could still be beaten, kept for last. Over a teammate it must keep
- * R3's bomb rule (no bomb, no broken structure) and the teammate must still hold two or more cards.
+ * can be led out with at most one play that could still be beaten, kept for last. Over a teammate the teammate
+ * must still hold two or more cards, and a bomb or a broken structure is only spent when the rest is sure to
+ * go out: every play after it unbeatable.
  */
 function startsGoOut(
   observation: AiObservation,
@@ -287,15 +288,14 @@ function startsGoOut(
   unseen: readonly number[],
 ): boolean {
   if (action.kind !== 'PLAY_CARDS') return false;
-  if (holderIsTeammate(observation) && (risky || observation.publicPlayers[observation.holderId!]!.remaining < 2)) {
-    return false;
-  }
+  const overTeammate = holderIsTeammate(observation);
+  if (overTeammate && observation.publicPlayers[observation.holderId!]!.remaining < 2) return false;
   const canBeat = opponentCanBeat(observation, unseen);
   if (canBeat(pattern)) return false;
   const counts = new Array<number>(Rank.BIG_JOKER + 1).fill(0);
   for (const card of observation.ownHand) counts[card.rank] = (counts[card.rank] ?? 0) + 1;
   for (const card of played) counts[card.rank] = (counts[card.rank] ?? 0) - 1;
-  return leadsOut(counts, 1, canBeat, new Map());
+  return leadsOut(counts, overTeammate && risky ? 0 : 1, canBeat, new Map());
 }
 
 /**
