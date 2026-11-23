@@ -14,7 +14,9 @@ export type ActionId =
   | 'replay' | 'new-game' | 'help' | 'close-help' | 'start' | 'deck-1' | 'deck-2'
   // Online play.
   | 'create-room' | 'join-room' | 'invite' | 'leave-room' | 'start-online' | 'room-lobby'
-  | 'auto-on' | 'auto-off' | 'seat-0' | 'seat-1' | 'seat-2' | 'seat-3';
+  | 'auto-on' | 'auto-off' | 'seat-0' | 'seat-1' | 'seat-2' | 'seat-3'
+  // Table tools.
+  | 'counter' | 'sound';
 
 export type SeatPosition = 'top' | 'left' | 'right' | 'bottom';
 
@@ -44,6 +46,28 @@ export interface HandScreen {
   /** During the human's own CHA/GOU prompt, only these cards can be picked; null otherwise. */
   readonly eligible: ReadonlySet<string> | null;
   readonly enabled: boolean;
+}
+
+/** One seat's latest action in the current trick, drawn in front of that seat. */
+export interface ZoneScreen {
+  readonly kind: 'PLAY' | 'PASS' | 'CHA' | 'GOU';
+  readonly cards: readonly Card[];
+  readonly label: string;
+  /** The play to beat. */
+  readonly leading: boolean;
+  readonly bomb: boolean;
+  /** Public action number: a new key means a new action to animate. */
+  readonly key: number;
+}
+
+export interface CounterScreen {
+  readonly entries: readonly { readonly label: string; readonly unseen: number }[];
+}
+
+/** Table tools the app keeps outside the game session. */
+export interface TableUi {
+  readonly counterOpen?: boolean;
+  readonly muted?: boolean;
 }
 
 export interface ResultScreen {
@@ -76,6 +100,10 @@ export interface TableScreen {
   readonly status: { readonly text: string; readonly forHuman: boolean };
   readonly history: readonly string[];
   readonly hand: HandScreen;
+  /** Two decks: the hand sits in columns by rank; one deck: one row. */
+  readonly handColumns: boolean;
+  readonly zones: Readonly<Record<SeatPosition, ZoneScreen | null>>;
+  readonly counter: CounterScreen | null;
   readonly caption: string;
   readonly error: string;
   readonly buttons: readonly ButtonScreen[];
@@ -117,11 +145,13 @@ function playButtons(snapshot: BrowserSessionSnapshot): ButtonScreen[] {
     const valid = picked.length === prompt.requiredCount && picked.every((id) => eligible.has(id));
     const verb = prompt.addition === 'CHA' ? '岔' : '勾';
     return [
-      { id: 'decline-goucha', label: '放弃', enabled: !busy, style: 'quiet' },
+      { id: 'decline-goucha', label: '放弃', enabled: !busy, style: 'secondary' },
       { id: 'confirm-goucha', label: `确认${verb}`, enabled: valid && !busy, style: 'primary' },
     ];
   }
   const controls = snapshot.viewModel.controls;
+  // Buttons only show on the player's own turn, like a card room's action bar.
+  if (!controls.showPlay) return [];
   return [
     { id: 'clear', label: '清除', enabled: picked.length > 0 && !busy, style: 'quiet' },
     { id: 'hint', label: '提示', enabled: controls.showHint && !busy, style: 'quiet' },
@@ -137,6 +167,7 @@ export function buildTableScreen(
   seed: number,
   online: OnlineTableInfo | null = null,
   canGoOnline = false,
+  ui: TableUi = {},
 ): TableScreen {
   const { state, viewModel } = snapshot;
   const deckCount = state.deckCount ?? chosenDeckCount;
@@ -191,13 +222,19 @@ export function buildTableScreen(
   const status = phaseMessage(state, viewModel, snapshot.isBusy, name, viewerId);
   const clock = online?.secondsLeft ?? null;
 
+  const started = state.phase !== 'SETUP';
+  const tools: ButtonScreen[] = [
+    { id: 'counter', label: '记牌器', enabled: started, style: ui.counterOpen === true ? 'primary' : 'quiet' },
+    { id: 'sound', label: ui.muted === true ? '音效 关' : '音效 开', enabled: true, style: 'quiet' },
+    { id: 'help', label: '规则', enabled: true, style: 'quiet' },
+  ];
   const topButtons: ButtonScreen[] = online === null
     ? [
-        { id: 'help', label: '规则', enabled: true, style: 'quiet' },
-        { id: 'new-game', label: '新局', enabled: state.phase !== 'SETUP', style: 'quiet' },
+        ...tools,
+        { id: 'new-game', label: '新局', enabled: started, style: 'quiet' },
       ]
     : [
-        { id: 'help', label: '规则', enabled: true, style: 'quiet' },
+        ...tools,
         online.auto
           ? { id: 'auto-off', label: '取消托管', enabled: !snapshot.isBusy, style: 'primary' }
           : { id: 'auto-on', label: '托管', enabled: !snapshot.isBusy && state.phase !== 'ROUND_RESULT', style: 'quiet' },
@@ -229,6 +266,24 @@ export function buildTableScreen(
       eligible: prompt === null ? null : new Set(prompt.eligibleCardIds),
       enabled: !snapshot.isBusy && state.phase !== 'SETUP' && state.phase !== 'ROUND_RESULT' && online?.auto !== true,
     },
+    handColumns: deckCount === 2,
+    zones: Object.fromEntries(POSITIONS.map((position) => {
+      const action = viewModel.seatActions[position];
+      return [position, action === null ? null : {
+        kind: action.kind,
+        cards: action.cardIds.flatMap((id) => {
+          const card = ALL_CARDS.get(id);
+          return card === undefined ? [] : [card];
+        }),
+        label: action.label,
+        leading: action.leading,
+        bomb: action.bomb,
+        key: action.key,
+      }];
+    })) as unknown as TableScreen['zones'],
+    counter: ui.counterOpen === true && started
+      ? { entries: viewModel.cardCounter.map((entry) => ({ label: entry.label, unseen: entry.unseen })) }
+      : null,
     caption: online?.auto === true ? '托管中：AI 正在替你出牌，点「取消托管」接回' : prompt !== null
       ? `${prompt.addition === 'CHA' ? '岔' : '勾'} ${rankLabel(prompt.rank)}：${prompt.addition === 'CHA' ? '选两张同点数的牌' : '选一张同点数的牌'}`
       : picked.length > 0 ? `已选 ${picked.length} 张` : '点手牌选择',

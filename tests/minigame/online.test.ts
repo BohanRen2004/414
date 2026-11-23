@@ -16,7 +16,8 @@ function fakeCanvas(): Canvas2D & { readonly numbers: number[]; readonly texts: 
     texts,
     fillStyle: '', strokeStyle: '', lineWidth: 1, font: '12px sans-serif', textAlign: 'left', textBaseline: 'top', globalAlpha: 1,
     save() {}, restore() {}, beginPath() {}, closePath() {}, fill() {}, stroke() {},
-    fillRect: record, moveTo: record, lineTo: record, arcTo: record, arc: record,
+    fillRect: record, moveTo: record, lineTo: record, arcTo: record, arc: record, ellipse: record, translate: record, scale: record,
+    createRadialGradient: (...values: number[]) => { record(...values); return { addColorStop() {} }; },
     fillText(value: string, x: number, y: number) { texts.push(value); record(x, y); },
     measureText(value: string) {
       const size = Number(/(\d+(?:\.\d+)?)px/.exec(this.font)?.[1] ?? 12);

@@ -364,6 +364,8 @@ export class OnlineSession {
         }
         if (this.queue.length === 0) this.presenting = false;
         this.publish();
+        // Each frame's events are reported once, so sounds and effects do not repeat on later redraws.
+        this.lastEvents = [];
         if (this.queue.length > 0) await this.wait(this.animationDelayMs);
       }
     } finally {

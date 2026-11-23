@@ -56,7 +56,21 @@ interface WxShareInfo {
   query?: string;
 }
 
+interface WxInnerAudioContext {
+  src: string;
+  obeyMuteSwitch: boolean;
+  play(): void;
+  stop(): void;
+}
+
+interface WxFileSystemManager {
+  writeFileSync(path: string, data: ArrayBuffer): void;
+}
+
 interface WxApi {
+  readonly env: { readonly USER_DATA_PATH: string };
+  createInnerAudioContext(): WxInnerAudioContext;
+  getFileSystemManager(): WxFileSystemManager;
   readonly cloud?: WxCloud;
   getLaunchOptionsSync(): WxLaunchOptions;
   onShow(handler: (options: WxLaunchOptions) => void): void;

@@ -13,7 +13,8 @@ function fakeCanvas(): Canvas2D & { readonly numbers: number[]; readonly texts: 
     texts,
     fillStyle: '', strokeStyle: '', lineWidth: 1, font: '12px sans-serif', textAlign: 'left', textBaseline: 'top', globalAlpha: 1,
     save() {}, restore() {}, beginPath() {}, closePath() {}, fill() {}, stroke() {},
-    fillRect: record, moveTo: record, lineTo: record, arcTo: record, arc: record,
+    fillRect: record, moveTo: record, lineTo: record, arcTo: record, arc: record, ellipse: record, translate: record, scale: record,
+    createRadialGradient: (...values: number[]) => { record(...values); return { addColorStop() {} }; },
     fillText(value: string, x: number, y: number) { texts.push(value); record(x, y); },
     measureText(value: string) {
       const size = Number(/(\d+(?:\.\d+)?)px/.exec(this.font)?.[1] ?? 12);
@@ -102,8 +103,9 @@ describe('WeChat mini game app', () => {
     expect(app.current.state.players[0].hand).toEqual(first.players[0].hand);
   });
 
-  it('selects several cards with one slide across the hand', async () => {
+  it('selects several cards with one slide across a one-deck hand', async () => {
     const app = new MiniGameApp(platform(), { animationDelayMs: 0 });
+    await app.perform('deck-1');
     await app.perform('start');
     // Get to an ordinary turn of the human's, where every hand card can be picked.
     for (let guard = 0; app.current.state.phase === 'GOUCHA_QUERY' || app.current.state.currentPlayer !== 0; guard += 1) {
@@ -147,6 +149,34 @@ describe('WeChat mini game app', () => {
     app.touchStart(6, ...center(clear.rect));
     await app.touchEnd(6, ...center(clear.rect));
     expect(app.current.selectedCardIds).toEqual([]);
+  });
+
+  it('picks one card per rank when a finger slides along the bottom of a two-deck hand', async () => {
+    const app = new MiniGameApp(platform(), { animationDelayMs: 0 });
+    await app.perform('start');
+    for (let guard = 0; app.current.state.phase === 'GOUCHA_QUERY' || app.current.state.currentPlayer !== 0; guard += 1) {
+      expect(guard).toBeLessThan(10);
+      await app.perform(app.current.state.phase === 'GOUCHA_QUERY' ? 'decline-goucha' : 'new-game');
+      if (app.current.state.phase === 'SETUP') await app.perform('start');
+    }
+    const cards = app.tappable.filter((region): region is Extract<HitRegion, { cardId: string }> => 'cardId' in region);
+    expect(cards.every((card) => card.column !== undefined)).toBe(true);
+    // The bottom card of each column: the region that reaches lowest.
+    const bottoms = new Map<number, Extract<HitRegion, { cardId: string }>>();
+    for (const card of cards) {
+      const known = bottoms.get(card.column!);
+      if (known === undefined || card.rect.y > known.rect.y) bottoms.set(card.column!, card);
+    }
+    const lowest = [...bottoms.values()].sort((a, b) => a.rect.x - b.rect.x);
+    const y = Math.max(...lowest.map((card) => card.rect.y)) + 20;
+    app.touchStart(1, lowest[0]!.rect.x + 4, y);
+    app.touchMove(1, lowest[3]!.rect.x + 4, y);
+    await app.touchEnd(1, lowest[3]!.rect.x + 4, y);
+    const picked = app.current.selectedCardIds;
+    expect(picked).toHaveLength(4);
+    const hand = app.current.state.players[0].hand;
+    const ranks = new Set(picked.map((id) => hand.find((card) => card.id === id)!.rank));
+    expect(ranks.size).toBe(4);
   });
 
   it('keeps every drawn coordinate finite on small and large screens', () => {

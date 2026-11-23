@@ -1,5 +1,6 @@
 import { MiniGameApp, OnlineHost } from './app';
 import { createCloudTransport } from './cloud-transport';
+import { SOUND_KINDS, SoundKind, wavFile } from './sfx';
 
 /** WeChat mini-game entry: one full-screen canvas in landscape, taps forwarded to the app. */
 
@@ -17,6 +18,67 @@ context.scale(info.pixelRatio, info.pixelRatio);
 
 const safe = info.safeArea ?? { left: 0, right: width, top: 0, bottom: height };
 
+/**
+ * Table sounds: each is synthesised once into a WAV file in the user data folder, then played through a
+ * small pool of audio contexts so quick plays can overlap. Any failure just means silence.
+ */
+const soundFiles = new Map<SoundKind, string>();
+function soundFile(kind: SoundKind): string | null {
+  const known = soundFiles.get(kind);
+  if (known !== undefined) return known;
+  try {
+    const path = `${wx.env.USER_DATA_PATH}/sfx-v1-${kind}.wav`;
+    wx.getFileSystemManager().writeFileSync(path, wavFile(kind));
+    soundFiles.set(kind, path);
+    return path;
+  } catch {
+    return null;
+  }
+}
+const voices = Array.from({ length: 4 }, () => {
+  try {
+    const audio = wx.createInnerAudioContext();
+    audio.obeyMuteSwitch = true;
+    return audio;
+  } catch {
+    return null;
+  }
+});
+let nextVoice = 0;
+function playSound(kind: SoundKind): void {
+  const path = soundFile(kind);
+  const voice = voices[nextVoice];
+  nextVoice = (nextVoice + 1) % voices.length;
+  if (path === null || voice === null || voice === undefined) return;
+  try {
+    voice.stop();
+    voice.src = path;
+    voice.play();
+  } catch {
+    // Audio is a nicety.
+  }
+}
+// Write the files ahead of the first play, after the first frame is up.
+setTimeout(() => { for (const kind of SOUND_KINDS) soundFile(kind); }, 500);
+
+function getItem(key: string): string | null {
+  try {
+    const value = wx.getStorageSync(key);
+    return typeof value === 'string' && value !== '' ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function setItem(key: string, value: string | null): void {
+  try {
+    if (value === null) wx.removeStorageSync(key);
+    else wx.setStorageSync(key, value);
+  } catch {
+    // Storage full or unavailable: the game works without it.
+  }
+}
+
 const online: OnlineHost = {
   transport: createCloudTransport,
   prompt: (title, placeholder) => new Promise((resolve) => {
@@ -29,22 +91,8 @@ const online: OnlineHost = {
     });
   }),
   share: (title, query) => wx.shareAppMessage({ title, query }),
-  getItem: (key) => {
-    try {
-      const value = wx.getStorageSync(key);
-      return typeof value === 'string' && value !== '' ? value : null;
-    } catch {
-      return null;
-    }
-  },
-  setItem: (key, value) => {
-    try {
-      if (value === null) wx.removeStorageSync(key);
-      else wx.setStorageSync(key, value);
-    } catch {
-      // Storage full or unavailable: the game works without it.
-    }
-  },
+  getItem,
+  setItem,
 };
 const app = new MiniGameApp({
   context,
@@ -58,6 +106,9 @@ const app = new MiniGameApp({
   },
   random: Math.random,
   now: () => Date.now(),
+  playSound,
+  getItem,
+  setItem,
   online,
   setTimeout: (handler, ms) => setTimeout(handler, ms),
   clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),

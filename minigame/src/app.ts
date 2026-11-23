@@ -1,11 +1,15 @@
 import { DEFAULT_DECK_COUNT, DeckCount } from '../../client/assets/scripts/core/cards/deck';
 import { RoomResponse } from '../../client/assets/scripts/online/protocol';
+import { recognize } from '../../client/assets/scripts/core/patterns/recognize';
+import { createDoubleDeck } from '../../client/assets/scripts/core/cards/deck';
+import { GameEvent } from '../../client/assets/scripts/core/state/game-event';
 import { dragSelection } from '../../client/assets/scripts/ui/hand-selection';
 import { errorMessage } from '../../client/assets/scripts/ui/labels';
 import { BrowserGameSession, BrowserSessionSnapshot } from '../../web/src/browser-session';
 import { OnlineSession, OnlineSnapshot, RoomTransport } from './online-session';
 import { Canvas2D, HitRegion, Viewport, drawFrame, drawLobbyFrame, hitTest } from './render';
-import { ActionId, buildLobbyScreen, buildTableScreen } from './screen';
+import { ActionId, SeatPosition, TableScreen, buildLobbyScreen, buildTableScreen } from './screen';
+import { SoundKind } from './sfx';
 
 /** What online play needs from the host: the cloud, a text prompt, sharing and local storage. */
 export interface OnlineHost {
@@ -28,6 +32,11 @@ export interface Platform {
   setTimeout(handler: () => void, ms: number): unknown;
   clearTimeout(handle: unknown): void;
   now?(): number;
+  /** Play a table sound; absent where there is no audio (tests). */
+  playSound?(kind: SoundKind): void;
+  /** Local storage for settings such as the sound switch; absent in tests. */
+  getItem?(key: string): string | null;
+  setItem?(key: string, value: string | null): void;
   readonly online?: OnlineHost;
 }
 
@@ -38,17 +47,33 @@ export interface AppOptions {
 
 const ROOM_KEY = '414.room';
 const NICKNAME_KEY = '414.nickname';
+const MUTE_KEY = '414.muted';
 /** A touch that moves further than this is a slide, not a tap. */
 const TAP_SLOP = 12;
+/** How long a new play takes to land in front of its seat, and how long the bomb banner stays. */
+const LAND_MS = 380;
+const FLASH_MS = 1100;
+const FRAME_MS = 16;
 
-/** A finger dragging across the hand, selecting (or clearing) every card it passes. */
+const ALL_CARDS = new Map(createDoubleDeck().map((card) => [card.id, card]));
+const BOMB_KINDS = new Set(['N_OF_KIND_BOMB', 'JOKER_BOMB', 'FOUR_A_FOUR']);
+
+/**
+ * A finger dragging across the hand. In a row it picks (or, starting on a picked card, clears) the span from
+ * the first card to the one under the finger; in rank columns, exactly the cards the finger crosses.
+ */
 interface HandDrag {
   readonly pointer: number;
+  readonly columns: boolean;
   /** Draggable cards in hand order, with their horizontal strips as laid out when the drag began. */
   readonly cards: readonly { readonly id: string; readonly left: number; readonly right: number }[];
   /** Selection when the drag began; cards outside the dragged span keep it. */
   readonly base: readonly string[];
   readonly from: number;
+  readonly selecting: boolean;
+  readonly visited: Set<string>;
+  lastX: number;
+  lastY: number;
   to: number;
   moved: boolean;
 }
@@ -75,9 +100,16 @@ export class MiniGameApp {
   private clockTimer: unknown = null;
   private joining = false;
   private drag: HandDrag | null = null;
+  private counterOpen = false;
+  private muted: boolean;
+  /** When each seat's shown action appeared, and the bomb banner, for the landing and banner animations. */
+  private readonly landed = new Map<SeatPosition, { key: number; at: number }>();
+  private flashFx: { text: string; at: number } | null = null;
+  private frameTimer: unknown = null;
   private readonly presses = new Map<number, { readonly x: number; readonly y: number }>();
 
   public constructor(private readonly platform: Platform, private readonly options: AppOptions = {}) {
+    this.muted = platform.getItem?.(MUTE_KEY) === '1';
     this.session = this.newSession(this.freshSeed());
     this.snapshot = this.session.snapshot();
     this.unsubscribe = this.session.subscribe((snapshot) => this.show(snapshot));
@@ -97,23 +129,92 @@ export class MiniGameApp {
   }
 
   public render(): void {
-    const overlay = { help: this.helpOpen, notice: this.notice };
     const online = this.online;
     const onlineSnapshot = this.onlineSnapshot;
+    const ui = { counterOpen: this.counterOpen, muted: this.muted };
     if (online !== null && onlineSnapshot !== null) {
       const room = onlineSnapshot.room;
       if (room.status === 'lobby') {
         this.regions = drawLobbyFrame(this.platform.context, this.platform.viewport,
-          buildLobbyScreen(room, onlineSnapshot.isBusy, onlineSnapshot.errorCode), overlay);
+          buildLobbyScreen(room, onlineSnapshot.isBusy, onlineSnapshot.errorCode), { help: this.helpOpen, notice: this.notice });
         return;
       }
       const screen = buildTableScreen(onlineSnapshot, room.deckCount, 0,
-        { room, secondsLeft: onlineSnapshot.secondsLeft, auto: onlineSnapshot.auto });
-      this.regions = drawFrame(this.platform.context, this.platform.viewport, screen, overlay);
+        { room, secondsLeft: onlineSnapshot.secondsLeft, auto: onlineSnapshot.auto }, false, ui);
+      this.drawTable(screen);
       return;
     }
-    const screen = buildTableScreen(this.snapshot, this.chosenDeckCount, this.session.seed, null, this.platform.online !== undefined);
-    this.regions = drawFrame(this.platform.context, this.platform.viewport, screen, overlay);
+    this.drawTable(buildTableScreen(this.snapshot, this.chosenDeckCount, this.session.seed, null, this.platform.online !== undefined, ui));
+  }
+
+  /** Draw a table screen with its effects, and keep redrawing while an effect is still moving. */
+  private drawTable(screen: TableScreen): void {
+    const now = this.now();
+    const zones: Partial<Record<SeatPosition, number>> = {};
+    let moving = false;
+    for (const position of ['top', 'left', 'right', 'bottom'] as const) {
+      const zone = screen.zones[position];
+      if (zone === null) {
+        this.landed.delete(position);
+        continue;
+      }
+      const seen = this.landed.get(position);
+      if (seen === undefined || seen.key !== zone.key) this.landed.set(position, { key: zone.key, at: now });
+      const progress = Math.min(1, (now - (this.landed.get(position)?.at ?? now)) / LAND_MS);
+      zones[position] = progress;
+      if (progress < 1) moving = true;
+    }
+    let flash: { text: string; progress: number } | null = null;
+    if (this.flashFx !== null) {
+      const progress = Math.min(1, (now - this.flashFx.at) / FLASH_MS);
+      if (progress < 1) {
+        flash = { text: this.flashFx.text, progress };
+        moving = true;
+      } else {
+        this.flashFx = null;
+      }
+    }
+    this.regions = drawFrame(this.platform.context, this.platform.viewport, screen,
+      { help: this.helpOpen, notice: this.notice, effects: { zones, flash } });
+    if (moving && this.frameTimer === null) {
+      this.frameTimer = this.platform.setTimeout(() => {
+        this.frameTimer = null;
+        this.render();
+      }, FRAME_MS);
+    }
+  }
+
+  private now(): number {
+    return this.platform.now?.() ?? Date.now();
+  }
+
+  /** Sounds and the bomb banner for what a shown frame did. */
+  private react(events: readonly GameEvent[], viewerTeam: number, winningTeam: number | null): void {
+    for (const event of events) {
+      if (event.kind === 'CARDS_PLAYED') {
+        const cards = event.cardIds.flatMap((id) => {
+          const card = ALL_CARDS.get(id);
+          return card === undefined ? [] : [card];
+        });
+        const pattern = recognize(cards);
+        if (BOMB_KINDS.has(pattern.kind)) {
+          this.flashFx = { text: pattern.kind === 'JOKER_BOMB' ? '王炸' : pattern.kind === 'FOUR_A_FOUR' ? '4A4' : cards.length === 3 ? '轰' : '炸弹', at: this.now() };
+          this.sound('bomb');
+        } else {
+          this.sound('play');
+        }
+      } else if (event.kind === 'PLAYER_PASSED') {
+        this.sound('pass');
+      } else if (event.kind === 'GOUCHA_ADDED') {
+        this.sound('cha');
+      } else if (event.kind === 'ROUND_FINISHED') {
+        this.sound(winningTeam === viewerTeam ? 'win' : 'lose');
+      }
+    }
+  }
+
+  private sound(kind: SoundKind): void {
+    if (!this.muted) this.platform.playSound?.(kind);
   }
 
   /** Handle a tap at logical coordinates; resolves when the triggered move and any replies are shown. */
@@ -139,17 +240,49 @@ export class MiniGameApp {
         ? [{ id: candidate.cardId, left: candidate.rect.x, right: candidate.rect.x + candidate.rect.w }]
         : []));
       const from = cards.findIndex((card) => card.id === region.cardId);
-      const base = this.online !== null ? this.online.selectedCardIds : this.session.selectedCardIds;
-      this.drag = { pointer, cards, base: [...base], from, to: from, moved: false };
+      const base = [...(this.online !== null ? this.online.selectedCardIds : this.session.selectedCardIds)];
+      this.drag = {
+        pointer,
+        columns: region.column !== undefined,
+        cards,
+        base,
+        from,
+        selecting: !base.includes(region.cardId),
+        visited: new Set([region.cardId]),
+        lastX: x,
+        lastY: y,
+        to: from,
+        moved: false,
+      };
       return;
     }
     this.presses.set(pointer, { x, y });
   }
 
-  public touchMove(pointer: number, x: number, _y: number): void {
+  public touchMove(pointer: number, x: number, y: number): void {
     const drag = this.drag;
     if (drag === null || drag.pointer !== pointer) return;
-    // Only the horizontal position counts, so a finger drifting off the cards keeps selecting.
+    if (drag.columns) {
+      // Sample the path since the last move, so a quick slide does not skip a column.
+      const steps = Math.max(1, Math.ceil(Math.hypot(x - drag.lastX, y - drag.lastY) / 6));
+      let changed = false;
+      for (let step = 1; step <= steps; step += 1) {
+        const region = hitTest(this.regions, drag.lastX + (x - drag.lastX) * (step / steps), drag.lastY + (y - drag.lastY) * (step / steps));
+        if (region !== null && 'cardId' in region && !drag.visited.has(region.cardId)) {
+          drag.visited.add(region.cardId);
+          changed = true;
+        }
+      }
+      drag.lastX = x;
+      drag.lastY = y;
+      if (!changed) return;
+      drag.moved = true;
+      this.select(drag.selecting
+        ? [...drag.base, ...[...drag.visited].filter((id) => !drag.base.includes(id))]
+        : drag.base.filter((id) => !drag.visited.has(id)));
+      return;
+    }
+    // In a row only the horizontal position counts, so a finger drifting off the cards keeps selecting.
     const first = drag.cards[0];
     const last = drag.cards[drag.cards.length - 1];
     if (first === undefined || last === undefined) return;
@@ -159,9 +292,12 @@ export class MiniGameApp {
     if (index === drag.to) return;
     drag.to = index;
     drag.moved = true;
-    const selection = dragSelection(drag.base, drag.cards.map((card) => card.id), drag.from, index);
-    if (this.online !== null) this.online.setSelection(selection);
-    else this.session.setSelection(selection);
+    this.select(dragSelection(drag.base, drag.cards.map((card) => card.id), drag.from, index));
+  }
+
+  private select(cardIds: readonly string[]): void {
+    if (this.online !== null) this.online.setSelection(cardIds);
+    else this.session.setSelection(cardIds);
   }
 
   public async touchEnd(pointer: number, x: number, y: number): Promise<void> {
@@ -174,6 +310,7 @@ export class MiniGameApp {
         if (this.online !== null) this.online.toggleCard(card.id);
         else this.session.toggleCard(card.id);
       }
+      this.sound('select');
       return;
     }
     const start = this.presses.get(pointer);
@@ -191,6 +328,13 @@ export class MiniGameApp {
   public async perform(action: ActionId): Promise<void> {
     if (action === 'help') { this.helpOpen = true; this.render(); return; }
     if (action === 'close-help') { this.helpOpen = false; this.render(); return; }
+    if (action === 'counter') { this.counterOpen = !this.counterOpen; this.render(); return; }
+    if (action === 'sound') {
+      this.muted = !this.muted;
+      this.platform.setItem?.(MUTE_KEY, this.muted ? '1' : '0');
+      this.render();
+      return;
+    }
     if (this.online !== null) {
       await this.performOnline(this.online, action);
       return;
@@ -357,6 +501,9 @@ export class MiniGameApp {
       return;
     }
     this.onlineSnapshot = snapshot;
+    const seat = snapshot.room.mySeat;
+    this.react(snapshot.events, seat % 2, snapshot.state.result?.winningTeam ?? null);
+    if (snapshot.events.some((event) => event.kind === 'TURN_CHANGED' && event.playerId === seat)) this.sound('turn');
     this.render();
     // Keep the countdown moving while it is the player's turn.
     if (snapshot.secondsLeft !== null && this.clockTimer === null) {
@@ -386,7 +533,10 @@ export class MiniGameApp {
 
   private show(snapshot: BrowserSessionSnapshot): void {
     this.snapshot = snapshot;
-    if (this.online === null) this.render();
+    if (this.online !== null) return;
+    this.react(snapshot.events, 0, snapshot.state.result?.winningTeam ?? null);
+    if (snapshot.events.some((event) => event.kind === 'TURN_CHANGED' && event.playerId === 0)) this.sound('turn');
+    this.render();
   }
 
   private newSession(seed: number): BrowserGameSession {
