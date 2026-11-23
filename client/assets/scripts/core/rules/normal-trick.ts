@@ -160,6 +160,7 @@ export function playCards(state: GameState, action: Extract<GameAction, { kind: 
       nextResponder: null,
       passedPlayerIds: [],
       gouCha: null,
+      leadActionNumber: previousTrick?.leadActionNumber ?? state.actionNumber,
     },
   };
 

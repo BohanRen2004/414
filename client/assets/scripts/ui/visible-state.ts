@@ -21,7 +21,7 @@ function publicChain(chain: GouChaChain): GouChaChain {
  * contributor holding, and nobody to act. It is the same whether anybody is then asked to continue
  * or the chain is already dead.
  */
-function pendingView(state: GameState, chain: GouChaChain): GameState {
+function pendingView(state: GameState, chain: GouChaChain, leadActionNumber: number): GameState {
   return {
     ...state,
     phase: 'GOUCHA_QUERY',
@@ -32,6 +32,7 @@ function pendingView(state: GameState, chain: GouChaChain): GameState {
       nextResponder: null,
       passedPlayerIds: [],
       gouCha: publicChain(chain),
+      leadActionNumber,
     },
   };
 }
@@ -50,7 +51,7 @@ export function visibleStateFor(state: GameState, viewerId: PlayerId): GameState
     // The viewer's own prompt: it may know it is being asked, not who declined before it.
     return { ...state, trick: { ...state.trick, gouCha: { ...chain, queryCursor: viewerId, declinedPlayerIds: [] } } };
   }
-  if (chain.additions.length > 0) return pendingView(state, chain);
+  if (chain.additions.length > 0) return pendingView(state, chain, state.trick.leadActionNumber);
   const nextResponder = nextActivePlayer(state.players, chain.holderId);
   return {
     ...state,
@@ -90,7 +91,7 @@ export function gouChaPendingFrame(before: GameState, after: GameState): GameSta
     additions,
     holderId: latest.playerId,
     nextAddition: latest.addition === 'CHA' ? 'GOU' : 'CHA',
-  });
+  }, before.trick!.leadActionNumber);
 }
 
 /** Events to show with a visible state: other seats' declines vanish and a turn change names the visible current player. */

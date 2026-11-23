@@ -1,4 +1,5 @@
 import { Card, PlayerId, Rank, TeamId } from '../core/cards/card';
+import { DEFAULT_DECK_COUNT, createDeck } from '../core/cards/deck';
 import { beats } from '../core/patterns/compare';
 import { recognize } from '../core/patterns/recognize';
 import { PatternErrorCode, PlayPattern } from '../core/patterns/play-pattern';
@@ -49,8 +50,35 @@ export interface GouChaPromptViewModel {
 
 export type { ResultViewModel } from './result-view-model';
 
+/** What one seat last did in the current trick, shown in front of that seat. */
+export interface SeatActionViewModel {
+  readonly kind: 'PLAY' | 'PASS' | 'CHA' | 'GOU';
+  /** Cards put down (none for a pass). */
+  readonly cardIds: readonly string[];
+  /** e.g. "对 K", "炸弹", "不出", "岔", "勾". */
+  readonly label: string;
+  /** This is the play everyone must beat (the trick's current play). */
+  readonly leading: boolean;
+  /** The public action number, so a front end can tell a new action from one already shown. */
+  readonly key: number;
+  /** A 轰, 炸弹, 王炸 or 4A4: worth a louder effect. */
+  readonly bomb: boolean;
+}
+
+/** 记牌器: how many of each rank the other three seats can still hold (all copies minus played and own). */
+export interface CardCounterEntry {
+  readonly rank: Rank;
+  readonly label: string;
+  readonly unseen: number;
+}
+
+type SeatPosition = 'bottom' | 'top' | 'left' | 'right';
+
 export interface TableViewModel {
-  readonly seats: Readonly<Record<'bottom' | 'top' | 'left' | 'right', SeatViewModel>>;
+  readonly seats: Readonly<Record<SeatPosition, SeatViewModel>>;
+  /** Each seat's latest action in the current trick; null before it acted or when no trick is open. */
+  readonly seatActions: Readonly<Record<SeatPosition, SeatActionViewModel | null>>;
+  readonly cardCounter: readonly CardCounterEntry[];
   readonly center: {
     /** The pattern to beat. A gou-cha chain is labelled by its single: CHA/GOU are actions, not a 轰 or 炸弹. */
     readonly patternLabel: string;
@@ -199,6 +227,50 @@ function buildPending(state: GameState, input: HumanUiState): GouChaPendingViewM
   return { playerId: latest.playerId, addition: latest.addition, rank: chain.rank };
 }
 
+const CARD_BY_ID: ReadonlyMap<string, Card> = new Map(createDeck(2).map((card) => [card.id, card]));
+
+function cardsOf(ids: readonly string[]): Card[] {
+  return ids.flatMap((id) => {
+    const card = CARD_BY_ID.get(id);
+    return card === undefined ? [] : [card];
+  });
+}
+
+function buildSeatAction(state: GameState, playerId: PlayerId): SeatActionViewModel | null {
+  const trick = state.trick;
+  if (trick === null) return null;
+  for (let index = state.publicHistory.length - 1; index >= 0; index -= 1) {
+    const record = state.publicHistory[index]!;
+    if (record.actionNumber < trick.leadActionNumber) break;
+    if (record.playerId !== playerId) continue;
+    const key = record.actionNumber;
+    if (record.kind === 'PASS') return { kind: 'PASS', cardIds: [], label: '不出', leading: false, key, bomb: false };
+    if (record.kind === 'CHA' || record.kind === 'GOU') {
+      return { kind: record.kind, cardIds: [...record.cardIds], label: record.kind === 'CHA' ? '岔' : '勾', leading: false, key, bomb: false };
+    }
+    const pattern = recognize(cardsOf(record.cardIds));
+    return {
+      key,
+      bomb: pattern.kind === 'N_OF_KIND_BOMB' || pattern.kind === 'JOKER_BOMB' || pattern.kind === 'FOUR_A_FOUR',
+      kind: 'PLAY',
+      cardIds: [...record.cardIds],
+      label: describePattern(pattern, state.phase),
+      leading: record.actionNumber === trick.currentPlay.actionNumber && trick.gouCha === null,
+    };
+  }
+  return null;
+}
+
+function buildCardCounter(state: GameState, ownHand: readonly Card[]): CardCounterEntry[] {
+  const deckCount = state.deckCount ?? DEFAULT_DECK_COUNT;
+  const unseen = new Map<Rank, number>();
+  for (const card of createDeck(deckCount)) unseen.set(card.rank, (unseen.get(card.rank) ?? 0) + 1);
+  for (const card of [...cardsOf(state.playedCardIds), ...ownHand]) unseen.set(card.rank, (unseen.get(card.rank) ?? 0) - 1);
+  return [...unseen.entries()]
+    .sort(([left], [right]) => right - left)
+    .map(([rank, count]) => ({ rank, label: rankLabel(rank), unseen: Math.max(0, count) }));
+}
+
 function buildResult(state: GameState): ResultViewModel | null {
   if (state.result === null) return null;
   return buildResultViewModel(state.result, state.rootSeed ?? 0);
@@ -238,8 +310,13 @@ export function buildTableViewModel(state: GameState, input: HumanUiState): Tabl
   const gouCha = buildGouChaPrompt(state, input);
   const cardIds = tableCardIds(state);
 
+  const seatActions = Object.fromEntries(Object.entries(positions)
+    .map(([position, playerId]) => [position, buildSeatAction(state, playerId as PlayerId)])) as unknown as TableViewModel['seatActions'];
+
   return {
     seats,
+    seatActions,
+    cardCounter: state.phase === 'SETUP' ? [] : buildCardCounter(state, state.players[bottomId]!.hand),
     center: {
       patternLabel: describePattern(currentPlay?.pattern ?? null, state.phase),
       holderId: state.trick?.holderId ?? null,

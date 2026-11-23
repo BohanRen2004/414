@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="felt" cx="50%" cy="40%" r="70%">
+      <stop offset="0" stop-color="#38ad72"/>
+      <stop offset="0.55" stop-color="#1f8450"/>
+      <stop offset="1" stop-color="#0f5636"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#felt)"/>
+  <g transform="rotate(-10 256 280)">
+    <rect x="150" y="120" width="212" height="296" rx="26" fill="#fffdf6" stroke="#0f5636" stroke-width="6"/>
+  </g>
+  <text x="256" y="318" text-anchor="middle" font-family="Arial Black, Arial, sans-serif" font-size="150" font-weight="900" letter-spacing="-8">
+    <tspan fill="#1d6a43">4</tspan><tspan fill="#ff9f1a">A</tspan><tspan fill="#1d6a43">4</tspan>
+  </text>
+</svg>

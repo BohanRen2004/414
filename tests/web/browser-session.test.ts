@@ -133,11 +133,16 @@ describe('browser game session', () => {
   describe('hidden gou-cha queries', () => {
     type Hands = Parameters<typeof buildState>[0]['hands'];
 
-    /** Everything the page draws from a snapshot: view model, phase banner inputs, seat highlight, center and history. */
+    /**
+     * Everything the page draws from a snapshot: view model, phase banner inputs, seat highlight, center and history.
+     * The card counter is left out: these fixtures count every card missing from the hands as played, so two
+     * fixtures that differ in a hidden hand also differ in that public played set, which a real game never would.
+     */
     function screen(snapshot: BrowserSessionSnapshot) {
       const { state } = snapshot;
+      const { cardCounter: _publicCount, ...viewModel } = snapshot.viewModel;
       return {
-        viewModel: snapshot.viewModel,
+        viewModel,
         phase: state.phase,
         currentPlayer: state.currentPlayer,
         nextAddition: state.trick?.gouCha?.nextAddition ?? null,

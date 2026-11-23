@@ -53,6 +53,8 @@ export interface TrickState {
   readonly nextResponder: PlayerId | null;
   readonly passedPlayerIds: readonly PlayerId[];
   readonly gouCha: GouChaChain | null;
+  /** Action number of the lead that opened this trick; every public record from it on belongs to the trick. */
+  readonly leadActionNumber: number;
 }
 
 /** Only actions every seat sees; a private gou-cha decline is never recorded. */

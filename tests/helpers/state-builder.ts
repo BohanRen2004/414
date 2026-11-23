@@ -16,6 +16,8 @@ export interface StateFixture {
   readonly passedPlayerIds?: readonly PlayerId[];
   readonly finishOrder?: readonly PlayerId[];
   readonly gouCha?: GouChaChain;
+  /** Where the trick began in the public history; defaults to the current play. */
+  readonly leadActionNumber?: number;
   /** Applied last for deliberate invariant-corruption fixtures. */
   readonly overrides?: Partial<GameState>;
 }
@@ -204,6 +206,7 @@ export function buildState(fixture: StateFixture): GameState {
       nextResponder: fixture.currentPlayer,
       passedPlayerIds: fixture.passedPlayerIds ?? [],
       gouCha: fixture.gouCha ?? null,
+      leadActionNumber: fixture.leadActionNumber ?? currentPlay.actionNumber,
     };
   }
 
