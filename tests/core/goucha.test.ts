@@ -480,7 +480,7 @@ describe('dead gou-cha (死岔/死勾): a chain with a CHA ends the trick when i
     ]);
   });
 
-  it('passes the lead clockwise when the final adder and their partner are both out', () => {
+  it('ends the round when the final adder going out leaves only one team holding cards', () => {
     const state = startSingleFive({
       0: [c('lead-five', Rank.FIVE), c('0-nine', Rank.NINE)],
       1: [c('1-cha-a', Rank.FIVE), c('1-cha-b', Rank.FIVE)],
@@ -489,7 +489,9 @@ describe('dead gou-cha (死岔/死勾): a chain with a CHA ends the trick when i
     }, [3]);
     const cha = dispatch(state, { kind: 'ADD_GOUCHA', playerId: 1, addition: 'CHA', cardIds: ['1-cha-a', '1-cha-b'] });
     expect(cha.players[1].finishPlace).toBe(2);
-    expect(cha).toMatchObject({ phase: 'FREE_LEAD', currentPlayer: 2, trick: null });
+    // Seats 0 and 2 are teammates: the result is decided, so nobody plays on.
+    expect(cha).toMatchObject({ phase: 'ROUND_RESULT', currentPlayer: null, finishOrder: [3, 1, 0, 2] });
+    expect(cha.result).toMatchObject({ winningTeam: 1, capturedOpponents: 2 });
   });
 
   it('keeps the base single as the current play during the chain: CHA/GOU cards are never merged into a bomb', () => {

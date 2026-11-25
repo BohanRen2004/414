@@ -331,7 +331,7 @@ function renderHelp(): string {
         <article><b>牌型</b><span>单张、对子、单/双/三顺、轰（3 张）/炸弹（4 张以上）、王炸、4A4（两张 4 加一张 A，最大）。</span></article>
         <article><b>出牌</b><span>轮流压过上一手或选择不出；其他人都不要时，最后压住的人接着出，他已出完就由搭档接着出（借光）。</span></article>
         <article><b>勾岔</b><span>单牌可以被别人用同点数的对子“岔”，岔之后才能用同点数单张“勾”，岔勾交替。有人岔过后链条一停，这一轮立刻结束，最后岔或勾的人接着出。</span></article>
-        <article><b>结算</b><span>只剩一人有牌时结束：第一个出完的人那队获胜，搭档之后出完的对手越少，抓的人越多。</span></article>
+        <article><b>结算</b><span>第一个出完的人那队获胜，搭档之后出完的对手越少，抓的人越多。只剩一人有牌、或一队两人都出完时立刻结束，剩下的同队两人不用再打。</span></article>
       </div>
       <p class="help-tip">操作：点牌选择，按住横着滑可以一次选一串；快捷键 H 提示、P 不出、回车出牌。</p>
       <button class="btn btn-play" data-action="close-help">明白了</button>

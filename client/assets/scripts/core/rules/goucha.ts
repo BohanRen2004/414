@@ -4,7 +4,7 @@ import { GameAction } from '../state/game-action';
 import { GameEvent } from '../state/game-event';
 import { GameState, GouChaChain, PlayerState, PublicActionRecord, TrickState } from '../state/game-state';
 import { RuleError, ruleError } from '../state/rule-error';
-import { active, completeIfOneActive, finishEvents, nextActivePlayer, nextLeadPlayer, recordFinish } from './normal-trick';
+import { active, completeIfDecided, finishEvents, nextActivePlayer, nextLeadPlayer, recordFinish } from './normal-trick';
 import type { ActionResult } from './reducer';
 
 function requiredCount(addition: 'CHA' | 'GOU'): 2 | 1 {
@@ -206,7 +206,7 @@ export function addGouCha(
     ...finishEvents(state, action.playerId, remaining),
   ];
   let next = remaining === 0 ? recordFinish(baseState, action.playerId) : baseState;
-  next = completeIfOneActive(next, events);
+  next = completeIfDecided(next, events);
   if (next.phase !== 'ROUND_RESULT') {
     next = advanceGouChaQuery(next);
     events.push(...transitionEvents(next));

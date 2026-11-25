@@ -193,18 +193,40 @@ describe('normal play', () => {
     expect(reset.currentPlayer).toBe(1);
   });
 
-  it('gives a finished winner\'s lead to the next active seat when their partner has also finished', () => {
+  it('ends the round once both opponents are out instead of letting the teammates play on', () => {
+    // Seat 3 is out; seat 1 goes out with the 6, so only seats 0 and 2 (one team) still hold cards.
     const state = responseState({
-      currentPlayer: 2,
-      finishOrder: [3, 1],
-      hands: { 0: [c('9x', Rank.NINE)], 1: [], 2: [c('9y', Rank.NINE)], 3: [] },
-      currentPlay: currentSingle('table-six', Rank.SIX, 3),
-      holderId: 3,
+      currentPlayer: 1,
+      finishOrder: [3],
+      hands: { 0: [c('9x', Rank.NINE), c('9z', Rank.NINE)], 1: [c('last-six', Rank.SIX)], 2: [c('9y', Rank.NINE)], 3: [] },
+      currentPlay: currentSingle('table-five', Rank.FIVE, 2),
+      holderId: 2,
       passedPlayerIds: [],
     });
-    const reset = dispatch(dispatch(state, { kind: 'PASS', playerId: 2 }), { kind: 'PASS', playerId: 0 });
-    expect(reset.phase).toBe('FREE_LEAD');
-    expect(reset.currentPlayer).toBe(0);
+    const result = expectSuccess(applyAction(state, { kind: 'PLAY_CARDS', playerId: 1, cardIds: ['last-six'] }));
+    expect(result.state.phase).toBe('ROUND_RESULT');
+    expect(result.state.currentPlayer).toBeNull();
+    // The teammates take the last places, fewer cards first: seat 2 (one card) third, seat 0 fourth.
+    expect(result.state.finishOrder).toEqual([3, 1, 2, 0]);
+    expect(result.state.result).toEqual({ finishOrder: [3, 1, 2, 0], winningTeam: 1, capturedOpponents: 2 });
+    expect(result.events.filter((event) => event.kind === 'PLAYER_FINISHED').map((event) => 'playerId' in event && event.playerId))
+      .toEqual([1, 2, 0]);
+    expect(result.events[result.events.length - 1]).toEqual({ kind: 'ROUND_FINISHED' });
+  });
+
+  it('plays on while both teams still hold cards', () => {
+    // Seat 3 is out; seat 0 goes out, leaving seats 1 and 2 from different teams.
+    const state = responseState({
+      currentPlayer: 0,
+      finishOrder: [3],
+      hands: { 0: [c('last-nine', Rank.NINE)], 1: [c('1-ten', Rank.TEN)], 2: [c('2-jack', Rank.JACK)], 3: [] },
+      currentPlay: currentSingle('table-five', Rank.FIVE, 2),
+      holderId: 2,
+      passedPlayerIds: [],
+    });
+    const result = expectSuccess(applyAction(state, { kind: 'PLAY_CARDS', playerId: 0, cardIds: ['last-nine'] }));
+    expect(result.state.phase).toBe('RESPONDING');
+    expect(result.state.finishOrder).toEqual([3, 0]);
   });
 
   it('records a player who uses their final card and immediately fills fourth place', () => {

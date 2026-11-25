@@ -67,7 +67,8 @@ function assertFinishOrder(state: GameState): void {
   }
 
   for (const player of state.players) {
-    if ((player.finishPlace !== null && player.finishPlace < 4 && player.hand.length > 0)
+    // A decided round may end with the last team still holding cards (see completeIfDecided).
+    if ((player.finishPlace !== null && player.finishPlace < 4 && player.hand.length > 0 && state.phase !== 'ROUND_RESULT')
       || (player.finishPlace === 4 && state.phase !== 'ROUND_RESULT')
       || (state.phase === 'ROUND_RESULT' && player.finishPlace === null)
       || ((state.phase === 'FREE_LEAD' || state.phase === 'RESPONDING' || state.phase === 'GOUCHA_QUERY')
