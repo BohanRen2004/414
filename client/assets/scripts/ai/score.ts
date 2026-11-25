@@ -9,6 +9,7 @@ import { AiObservation } from './ai-observation';
 export interface CandidateScore {
   readonly finishesNow: number;
   /** R6 go-out plan (see startsGoOut): right after an outright finish, before the phase policy. */
+  /** R6 go-out plan (see startsGoOut) = 1; saving a trump bomb to finish on, so the partner leads next (see startsTrumpFinish) = 2. */
   readonly goOut: number;
   /** Phase policy gate (see policyTier); after finishesNow and goOut, a higher tier always wins. */
   readonly tier: number;
@@ -308,6 +309,52 @@ function startsGoOut(
   return leadsOut(counts, overTeammate && risky ? 0 : 1, canBeat, new Map());
 }
 
+/** Cards in a bomb, for "could an opponent go out by playing it". */
+function bombSize(bomb: PlayPattern): number {
+  if (bomb.kind === 'N_OF_KIND_BOMB') return bomb.count;
+  return bomb.kind === 'JOKER_BOMB' ? 2 : 3;
+}
+
+/**
+ * R6, trump last: on a free lead, lead the one play that could be beaten now and keep a 王炸 or 4A4 nobody can
+ * beat for the finish. If the lead is beaten, the trump answers it; if not, the trump is led. Either way the hand
+ * goes out on a play nobody can beat, so the partner leads next (借光) instead of whoever beat the last play.
+ * Only when the rest of the hand is unbeatable too, the lead is not a single (a CHA could take it), and no opponent
+ * could go out by beating it.
+ */
+function startsTrumpFinish(
+  observation: AiObservation,
+  action: GameAction,
+  played: readonly Card[],
+  pattern: PlayPattern,
+  unseen: readonly number[],
+): boolean {
+  if (action.kind !== 'PLAY_CARDS' || observation.phase !== 'FREE_LEAD' || pattern.kind === 'SINGLE' || pattern.kind === 'INVALID') return false;
+  const canBeat = opponentCanBeat(observation, unseen);
+  if (!canBeat(pattern)) return false;
+  for (const player of observation.publicPlayers) {
+    if (player.teamId === observation.teamId || player.remaining === 0) continue;
+    const r = player.remaining;
+    const outInKind = r === played.length && unseenBeatsInKind(pattern, unseen, r);
+    const outByBomb = possibleBombs(unseen, r, observation.deckCount).some((bomb) => bombSize(bomb) === r && beats(bomb, pattern));
+    if (outInKind || outByBomb) return false;
+  }
+  const counts = new Array<number>(Rank.BIG_JOKER + 1).fill(0);
+  for (const card of observation.ownHand) counts[card.rank] = (counts[card.rank] ?? 0) + 1;
+  for (const card of played) counts[card.rank] = (counts[card.rank] ?? 0) - 1;
+  const trumps: { readonly bomb: PlayPattern; readonly ranks: readonly Rank[] }[] = [
+    { bomb: { kind: 'FOUR_A_FOUR', allHearts: false }, ranks: [Rank.FOUR, Rank.FOUR, Rank.ACE] },
+    { bomb: { kind: 'JOKER_BOMB' }, ranks: [Rank.SMALL_JOKER, Rank.BIG_JOKER] },
+  ];
+  for (const trump of trumps) {
+    const rest = [...counts];
+    if (!trump.ranks.every((rank) => (rest[rank]! -= 1) >= 0)) continue;
+    if (canBeat(trump.bomb)) continue;
+    if (leadsOut(rest, 0, canBeat, new Map())) return true;
+  }
+  return false;
+}
+
 /**
  * Free lead: 1 keeps every structure, 0 otherwise.
  * Opponent holds: 3 safe beat or join, 2 bomb or break when nothing safe beats, 1 pass/decline,
@@ -383,11 +430,13 @@ export function scoreCandidate(observation: AiObservation, action: GameAction): 
   const unseen = unseenRankCounts(observation);
   const tier = policyTier(observation, action, risky, shapeGain, unseen);
   const safeLead = observation.phase === 'FREE_LEAD' && tier > 0;
-  const goOut = !finishing && startsGoOut(observation, action, cards, pattern, risky, unseen);
+  const goOut = finishing ? 0
+    : startsTrumpFinish(observation, action, cards, pattern, unseen) ? 2
+      : startsGoOut(observation, action, cards, pattern, risky, unseen) ? 1 : 0;
 
   return {
     finishesNow: finishing ? 1 : 0,
-    goOut: goOut ? 1 : 0,
+    goOut,
     tier,
     structuresBroken,
     strength: safeLead ? 0 : patternStrength(pattern),

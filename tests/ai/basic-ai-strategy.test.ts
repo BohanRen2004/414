@@ -349,6 +349,24 @@ describe('basic AI strategy: R6 go-out plan (收尾抢权)', () => {
       expect(decide(counted(2, cards(SIX, ACE, ACE, SMALL_JOKER, BIG_JOKER), others)).ranks).toEqual([ACE, ACE]);
     });
 
+    it.each(BOTH_VERSIONS)('leads the beatable straight and keeps an unbeatable 4A4 to finish on (%i deck)', (deckCount) => {
+      // The reported game: the straight could be beaten, the 4A4 cannot. Leading the straight first means the
+      // hand always goes out on the 4A4 (answering a beat, or led next), so the partner leads afterwards.
+      const others = { 1: cards(EIGHT, NINE, TEN, JACK, QUEEN, THREE), 2: cards(THREE, FIVE, SEVEN), 3: cards(KING, KING, FIVE, FIVE) };
+      expect(decide(counted(deckCount, cards(SIX, SEVEN, EIGHT, NINE, TEN, FOUR, FOUR, ACE), others)).ranks)
+        .toEqual([SIX, SEVEN, EIGHT, NINE, TEN]);
+    });
+
+    it.each(BOTH_VERSIONS)('leads the 4A4 first when an opponent could go out by beating the straight (%i deck)', (deckCount) => {
+      const others = { 1: cards(EIGHT, NINE, TEN, JACK, QUEEN), 2: cards(THREE, FIVE, SEVEN), 3: cards(KING, KING, FIVE, FIVE) };
+      expect(decide(counted(deckCount, cards(SIX, SEVEN, EIGHT, NINE, TEN, FOUR, FOUR, ACE), others)).pattern?.kind).toBe('FOUR_A_FOUR');
+    });
+
+    it.each(BOTH_VERSIONS)('never saves the trump behind a single, which a CHA could take (%i deck)', (deckCount) => {
+      const others = { 1: cards(TEN, JACK, QUEEN, THREE), 2: cards(THREE, FIVE, SEVEN), 3: cards(KING, KING, FIVE, FIVE) };
+      expect(decide(counted(deckCount, cards(NINE, FOUR, FOUR, ACE), others)).pattern?.kind).toBe('FOUR_A_FOUR');
+    });
+
     it.each(BOTH_VERSIONS)('still finishes outright (R1) before any go-out plan (%i deck)', (deckCount) => {
       // Each single would start a go-out plan, but Q-K-A empties the hand at once.
       const others = { 1: cards(SEVEN, EIGHT), 2: cards(NINE, TEN, JACK), 3: cards(FIVE, SIX) };
