@@ -412,10 +412,15 @@ function replaceSession(next: BrowserGameSession): void {
   session = next;
   chosenDeckCount = next.deckCount;
   unsubscribe = session.subscribe(onSnapshot);
-  const url = new URL(window.location.href);
-  url.searchParams.set('seed', String(next.seed));
-  url.searchParams.set('decks', String(next.deckCount));
-  window.history.replaceState({}, '', url);
+  // Keep the seed in the address so a game can be shared; embedded pages may refuse this, which is harmless.
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set('seed', String(next.seed));
+    url.searchParams.set('decks', String(next.deckCount));
+    window.history.replaceState({}, '', url);
+  } catch {
+    // The game works the same without it.
+  }
 }
 
 function newSession(seed: number, deckCount: DeckCount): BrowserGameSession {
