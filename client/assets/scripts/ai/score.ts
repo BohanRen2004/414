@@ -273,6 +273,16 @@ function holderIsTeammate(observation: AiObservation): boolean {
     && observation.publicPlayers[holderId]?.teamId === observation.teamId;
 }
 
+/** A teammate down to this many cards keeps the lead: only going out at once (R1) may beat their play. */
+const TEAMMATE_KEEPS_LEAD = 2;
+
+/** The teammate holds the trick and is about to go out themselves. */
+function teammateNearlyOut(observation: AiObservation): boolean {
+  if (!holderIsTeammate(observation)) return false;
+  const remaining = observation.publicPlayers[observation.holderId!]!.remaining;
+  return remaining > 0 && remaining <= TEAMMATE_KEEPS_LEAD;
+}
+
 /**
  * R6 收尾抢权 (go-out plan): a play no opponent can beat (see opponentCanBeat), after which the rest of the hand
  * can be led out with at most one play that could still be beaten, kept for last. Over a teammate the teammate
@@ -289,7 +299,7 @@ function startsGoOut(
 ): boolean {
   if (action.kind !== 'PLAY_CARDS') return false;
   const overTeammate = holderIsTeammate(observation);
-  if (overTeammate && observation.publicPlayers[observation.holderId!]!.remaining < 2) return false;
+  if (teammateNearlyOut(observation) || (overTeammate && observation.publicPlayers[observation.holderId!]!.remaining === 0)) return false;
   const canBeat = opponentCanBeat(observation, unseen);
   if (canBeat(pattern)) return false;
   const counts = new Array<number>(Rank.BIG_JOKER + 1).fill(0);
@@ -315,7 +325,7 @@ function policyTier(
   if (action.kind === 'PASS' || action.kind === 'DECLINE_GOUCHA') return 1;
   if (observation.phase === 'FREE_LEAD') return risky ? 0 : 1;
   if (holderIsTeammate(observation)) {
-    if (action.kind === 'ADD_GOUCHA' || risky) return 0;
+    if (action.kind === 'ADD_GOUCHA' || risky || teammateNearlyOut(observation)) return 0;
     return shapeGain >= 3 || opponentThreat(observation, unseen) ? 2 : 0;
   }
   if (!risky) return 3;

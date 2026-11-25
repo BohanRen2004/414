@@ -48,7 +48,8 @@ function buildRespondingToGroup(hand: readonly Card[], currentPlay: CardGroup) {
     hands: {
       0: hand,
       1: sameRank(Rank.TWO, 4),
-      2: [c('group-seat2', Rank.THREE)],
+      // Three cards: a teammate on one or two cards keeps the lead whatever the AI holds.
+      2: [c('group-seat2', Rank.THREE), c('group-seat2b', Rank.TEN), c('group-seat2c', Rank.QUEEN)],
       3: sameRank(Rank.JACK, 4),
     },
     currentPlay,

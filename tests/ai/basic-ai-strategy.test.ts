@@ -384,11 +384,13 @@ describe('basic AI strategy: R6 go-out plan (收尾抢权)', () => {
 
     it.each(BOTH_VERSIONS)('takes over without a threat to start a go-out plan (%i deck)', (deckCount) => {
       // R3 alone passes: both opponents hold four cards.
-      const state = counted(deckCount, cards(SIX, TWO), calm(cards(NINE, TEN)), teammateFive());
+      const state = counted(deckCount, cards(SIX, TWO), calm(cards(NINE, TEN, JACK)), teammateFive());
       expect(decide(state).ranks).toEqual([TWO]);
     });
 
-    it.each(BOTH_VERSIONS)('does not take over a teammate down to one card or already out (%i deck)', (deckCount) => {
+    it.each(BOTH_VERSIONS)('leaves the lead to a teammate down to one or two cards, or already out (%i deck)', (deckCount) => {
+      const twoCards = counted(deckCount, cards(SIX, TWO), calm(cards(NINE, TEN)), teammateFive());
+      expect(decide(twoCards).kind).toBe('PASS');
       const oneCard = counted(deckCount, cards(SIX, TWO), calm(cards(NINE)), teammateFive());
       expect(decide(oneCard).kind).toBe('PASS');
       const out = counted(deckCount, cards(SIX, TWO), calm([]), teammateFive(), [2]);
@@ -405,6 +407,22 @@ describe('basic AI strategy: R6 go-out plan (收尾抢权)', () => {
         const state = counted(deckCount, cards(...hand), calm(cards(NINE, TEN, JACK)), teammateFive());
         expect(decide(state).kind, `${deckCount} deck`).toBe('PASS');
       }
+    });
+
+    it.each(BOTH_VERSIONS)('does not top a teammate on their last card even when an opponent is nearly out (%i deck)', (deckCount) => {
+      // The reported game: the teammate led a 2 keeping only the small joker; the AI held the big joker and
+      // used to beat the 2 (R3), taking the lead the teammate needed to go out.
+      const state = counted(deckCount, cards(BIG_JOKER, NINE, JACK, KING),
+        { 1: cards(SEVEN), 2: cards(SMALL_JOKER), 3: cards(QUEEN, KING, THREE, FIVE) },
+        { cards: table(TWO), holderId: 2 });
+      expect(decide(state).kind).toBe('PASS');
+    });
+
+    it.each(BOTH_VERSIONS)('still goes out at once over a teammate on their last card (%i deck)', (deckCount) => {
+      const state = counted(deckCount, cards(BIG_JOKER),
+        { 1: cards(SEVEN), 2: cards(SMALL_JOKER), 3: cards(QUEEN, KING, THREE, FIVE) },
+        { cards: table(TWO), holderId: 2 });
+      expect(decide(state).ranks).toEqual([BIG_JOKER]);
     });
 
     it.each(BOTH_VERSIONS)('bombs a teammate when that makes going out certain (%i deck)', (deckCount) => {
