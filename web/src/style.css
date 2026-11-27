@@ -8,6 +8,8 @@
   font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", "Hiragino Sans GB", system-ui, sans-serif;
   --app-w: 100vw;
   --app-h: 100vh;
+  --app-x: 0px;
+  --app-y: 0px;
   --safe-left: 0px;
   --safe-right: 0px;
   --felt-light: #38ad72;
@@ -42,9 +44,10 @@ button:disabled { cursor: default; }
 button:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid var(--gold); outline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
-#app { width: var(--app-w); height: var(--app-h); overflow: hidden; }
+/* Placed over the part of the window on screen (main.ts measures it). */
+#app { position: fixed; top: var(--app-y); left: var(--app-x); width: var(--app-w); height: var(--app-h); overflow: hidden; }
 /* A phone held upright: the game is turned a quarter so it is always played sideways. */
-html.rotated #app { position: fixed; top: 0; left: 0; transform-origin: top left; transform: translateX(var(--app-h)) rotate(90deg); }
+html.rotated #app { transform-origin: top left; transform: translateX(var(--app-h)) rotate(90deg); }
 
 .game {
   position: relative;

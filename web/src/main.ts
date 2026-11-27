@@ -78,34 +78,80 @@ function touchLayout(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 }
 
-function isPhone(): boolean {
-  return touchLayout() && Math.min(window.innerWidth, window.innerHeight) <= 540;
+interface ScreenBox { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
+
+/**
+ * The part of the window that is on screen. Some hosts give the page a frame taller than the screen (the
+ * Claude app's artifact view, some in-app browsers), so innerWidth/innerHeight overstate what the player
+ * sees and the table would run off the edge. An IntersectionObserver on a probe covering the window reports
+ * the part actually on screen, even from inside a cross-origin frame.
+ */
+let onScreen: ScreenBox | null = null;
+
+function screenBox(): ScreenBox {
+  const whole = { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight };
+  const seen = onScreen;
+  // A frame not shown yet (or scrolled almost away) leaves nothing sensible to fit to.
+  if (seen === null || seen.w < 200 || seen.h < 150) return whole;
+  return {
+    x: Math.max(0, seen.x),
+    y: Math.max(0, seen.y),
+    w: Math.min(seen.w, whole.w),
+    h: Math.min(seen.h, whole.h),
+  };
+}
+
+function watchScreenBox(onChange: () => void): void {
+  if (typeof IntersectionObserver !== 'function') return;
+  const probe = document.createElement('div');
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.cssText = 'position:fixed;inset:0;pointer-events:none;opacity:0;z-index:-1';
+  document.body.append(probe);
+  const thresholds = Array.from({ length: 101 }, (_, index) => index / 100);
+  new IntersectionObserver((entries) => {
+    const rect = entries[entries.length - 1]!.intersectionRect;
+    const next = { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) };
+    const last = onScreen;
+    if (last !== null && last.x === next.x && last.y === next.y && last.w === next.w && last.h === next.h) return;
+    onScreen = next;
+    onChange();
+  }, { threshold: thresholds }).observe(probe);
+}
+
+function isPhone(box: ScreenBox): boolean {
+  return touchLayout() && Math.min(box.w, box.h) <= 540;
 }
 
 /**
- * The game is one landscape screen. Its size goes to --app-w/--app-h; a phone held upright gets the whole
- * game turned a quarter (html.rotated), with the notch side kept clear through --safe-left/--safe-right.
+ * The game is one landscape screen. Its size goes to --app-w/--app-h and its place to --app-x/--app-y; a
+ * phone held upright gets the whole game turned a quarter (html.rotated), with the notch side kept clear
+ * through --safe-left/--safe-right.
  */
 function applyLayout(): void {
   // A keyboard opening for the seed field shrinks the window; keep the layout until it closes.
   if (document.activeElement instanceof HTMLInputElement && document.documentElement.classList.contains('phone')) return;
   const html = document.documentElement;
-  const phone = isPhone();
-  const rotated = phone && window.innerHeight > window.innerWidth;
+  const box = screenBox();
+  const phone = isPhone(box);
+  const rotated = phone && box.h > box.w;
   html.classList.toggle('phone', phone);
   html.classList.toggle('rotated', rotated);
   // A short table (phones in landscape) puts the partner's play beside the partner instead of below.
-  html.classList.toggle('short', (rotated ? window.innerWidth : window.innerHeight) <= 480);
-  html.style.setProperty('--app-w', `${rotated ? window.innerHeight : window.innerWidth}px`);
-  html.style.setProperty('--app-h', `${rotated ? window.innerWidth : window.innerHeight}px`);
+  html.classList.toggle('short', (rotated ? box.w : box.h) <= 480);
+  html.style.setProperty('--app-x', `${box.x}px`);
+  html.style.setProperty('--app-y', `${box.y}px`);
+  html.style.setProperty('--app-w', `${rotated ? box.h : box.w}px`);
+  html.style.setProperty('--app-h', `${rotated ? box.w : box.h}px`);
   html.style.setProperty('--safe-left', rotated ? 'env(safe-area-inset-top, 0px)' : 'env(safe-area-inset-left, 0px)');
   html.style.setProperty('--safe-right', rotated ? 'env(safe-area-inset-bottom, 0px)' : 'env(safe-area-inset-right, 0px)');
 }
 applyLayout();
-window.addEventListener('resize', () => {
+function relayout(): void {
   applyLayout();
   render(session.snapshot());
-});
+}
+window.addEventListener('resize', relayout);
+watchScreenBox(relayout);
 
 // --- Pieces ------------------------------------------------------------------------------------------------
 
