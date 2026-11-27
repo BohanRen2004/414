@@ -1,5 +1,5 @@
 import { Card, PlayerId, Rank, TeamId } from '../cards/card';
-import type { DeckCount } from '../cards/deck';
+import type { DeckCount, PlayerCount } from '../cards/deck';
 import { CardGroup } from '../patterns/play-pattern';
 import { RULES_VERSION } from '../index';
 
@@ -66,8 +66,11 @@ export interface PublicActionRecord {
 }
 
 export interface GameResult {
-  readonly finishOrder: readonly [PlayerId, PlayerId, PlayerId, PlayerId];
+  /** Every seated player in finishing order. */
+  readonly finishOrder: readonly PlayerId[];
+  /** The first finisher's team (with fewer than four players, the first finisher alone). */
   readonly winningTeam: TeamId;
+  /** Four players only: opponents finishing after the winners' second player. Always 0 otherwise. */
   readonly capturedOpponents: 0 | 1 | 2;
 }
 
@@ -77,6 +80,10 @@ export interface GameState {
   readonly rootSeed: number | null;
   /** Game version set by START_GAME: one deck (54 cards) or two decks (108 cards); null before the deal. */
   readonly deckCount: DeckCount | null;
+  /** Players at the table; seats from this number on are empty (no cards, never act). */
+  readonly playerCount: PlayerCount;
+  /** Cards dealt to nobody (two players set 10 aside). Hidden from every player. */
+  readonly buriedCardIds: readonly string[];
   readonly randomState: { readonly deal: number } | null;
   readonly firstPlayer: PlayerId | null;
   readonly players: readonly [PlayerState, PlayerState, PlayerState, PlayerState];

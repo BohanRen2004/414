@@ -74,8 +74,19 @@ export interface CardCounterEntry {
 
 type SeatPosition = 'bottom' | 'top' | 'left' | 'right';
 
+/**
+ * Where each seat sits from the viewer's chair, clockwise from the bottom: four players use bottom, left, top
+ * and right; three use bottom, left and right; two sit face to face, bottom and top.
+ */
+export function seatPositions(viewerId: PlayerId, playerCount: number): Readonly<Partial<Record<SeatPosition, PlayerId>>> {
+  const order: readonly SeatPosition[] = playerCount === 2 ? ['bottom', 'top'] : playerCount === 3 ? ['bottom', 'left', 'right'] : ['bottom', 'left', 'top', 'right'];
+  return Object.fromEntries(order.map((position, offset) => [position, ((viewerId + offset) % playerCount) as PlayerId]));
+}
+
 export interface TableViewModel {
-  readonly seats: Readonly<Record<SeatPosition, SeatViewModel>>;
+  /** The viewer at the bottom; positions nobody sits at (two or three players) are null. */
+  readonly seats: Readonly<{ bottom: SeatViewModel } & Record<Exclude<SeatPosition, 'bottom'>, SeatViewModel | null>>;
+  readonly playerCount: number;
   /** Each seat's latest action in the current trick; null before it acted or when no trick is open. */
   readonly seatActions: Readonly<Record<SeatPosition, SeatActionViewModel | null>>;
   readonly cardCounter: readonly CardCounterEntry[];
@@ -97,10 +108,6 @@ export interface TableViewModel {
   };
   readonly gouCha: GouChaPromptViewModel | null;
   readonly result: ResultViewModel | null;
-}
-
-function seatAtOffset(playerId: PlayerId, offset: number): PlayerId {
-  return ((playerId + offset) % 4) as PlayerId;
 }
 
 function rankLabel(rank: Rank): string {
@@ -281,14 +288,16 @@ export function buildTableViewModel(state: GameState, input: HumanUiState): Tabl
     throw new RangeError(`humanPlayerId must be an integer seat from 0 to 3; received ${String(input.humanPlayerId)}`);
   }
   const bottomId = input.humanPlayerId;
-  const positions = {
+  const seated = seatPositions(bottomId, state.playerCount);
+  const positions: Record<SeatPosition, PlayerId | null> = {
     bottom: bottomId,
-    left: seatAtOffset(bottomId, 1),
-    top: seatAtOffset(bottomId, 2),
-    right: seatAtOffset(bottomId, 3),
-  } as const;
+    left: seated.left ?? null,
+    top: seated.top ?? null,
+    right: seated.right ?? null,
+  };
   const seats = Object.fromEntries(Object.entries(positions).map(([position, playerId]) => {
-    const player = state.players[playerId as PlayerId]!;
+    if (playerId === null) return [position, null];
+    const player = state.players[playerId]!;
     const base = {
       playerId: player.playerId,
       teamId: player.teamId,
@@ -311,10 +320,11 @@ export function buildTableViewModel(state: GameState, input: HumanUiState): Tabl
   const cardIds = tableCardIds(state);
 
   const seatActions = Object.fromEntries(Object.entries(positions)
-    .map(([position, playerId]) => [position, buildSeatAction(state, playerId as PlayerId)])) as unknown as TableViewModel['seatActions'];
+    .map(([position, playerId]) => [position, playerId === null ? null : buildSeatAction(state, playerId)])) as unknown as TableViewModel['seatActions'];
 
   return {
     seats,
+    playerCount: state.playerCount,
     seatActions,
     cardCounter: state.phase === 'SETUP' ? [] : buildCardCounter(state, state.players[bottomId]!.hand),
     center: {

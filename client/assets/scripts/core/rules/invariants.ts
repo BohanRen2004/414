@@ -32,6 +32,7 @@ function assertCardConservation(state: GameState): void {
   const cardIds = [
     ...state.players.flatMap((player) => player.hand.map((card) => card.id)),
     ...state.playedCardIds,
+    ...state.buriedCardIds,
   ];
   const seen = new Set<string>();
   for (const id of cardIds) {
@@ -43,8 +44,10 @@ function assertCardConservation(state: GameState): void {
   if (foreign !== undefined) fail('CARD_TOTAL', `card ${foreign.id} belongs to deck ${foreign.deckIndex + 1} of a ${deckCount}-deck game`);
   const expected = deckSize(state.deckCount);
   if (cardIds.length !== expected) {
-    fail('CARD_TOTAL', `expected ${expected} cards across hands and played area, found ${cardIds.length}`);
+    fail('CARD_TOTAL', `expected ${expected} cards across hands, played area and set-aside cards, found ${cardIds.length}`);
   }
+  const empty = state.players.find((player) => player.playerId >= state.playerCount && (player.hand.length > 0 || player.finishPlace !== null));
+  if (empty !== undefined) fail('CARD_TOTAL', `seat ${empty.playerId} is not at a ${state.playerCount}-player table`);
 }
 
 function assertFinishOrder(state: GameState): void {
@@ -67,9 +70,10 @@ function assertFinishOrder(state: GameState): void {
   }
 
   for (const player of state.players) {
+    if (player.playerId >= state.playerCount) continue;
     // A decided round may end with the last team still holding cards (see completeIfDecided).
     if ((player.finishPlace !== null && player.finishPlace < 4 && player.hand.length > 0 && state.phase !== 'ROUND_RESULT')
-      || (player.finishPlace === 4 && state.phase !== 'ROUND_RESULT')
+      || (player.finishPlace === state.playerCount && state.phase !== 'ROUND_RESULT')
       || (state.phase === 'ROUND_RESULT' && player.finishPlace === null)
       || ((state.phase === 'FREE_LEAD' || state.phase === 'RESPONDING' || state.phase === 'GOUCHA_QUERY')
         && player.hand.length === 0 && player.finishPlace === null)) {
@@ -151,10 +155,10 @@ function assertPhaseAndTrick(state: GameState): void {
     return;
   }
   if (state.phase === 'ROUND_RESULT') {
-    if (trick === null || state.result === null || state.finishOrder.length !== 4) {
+    if (trick === null || state.result === null || state.finishOrder.length !== state.playerCount) {
       fail('PHASE_TRICK_MISMATCH', 'ROUND_RESULT requires a result and complete finish order');
     }
-    const expectedResult = buildResult(state.finishOrder);
+    const expectedResult = buildResult(state.finishOrder, state.playerCount);
     if (state.result.winningTeam !== expectedResult.winningTeam
       || state.result.capturedOpponents !== expectedResult.capturedOpponents
       || state.result.finishOrder.some((playerId, index) => playerId !== expectedResult.finishOrder[index])) {

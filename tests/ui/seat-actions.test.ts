@@ -41,7 +41,7 @@ describe('seat actions and the card counter', () => {
       expect(leading.length).toBe(state.trick.gouCha === null ? 1 : 0);
       const last = state.publicHistory[state.publicHistory.length - 1]!;
       if (last.kind === 'PASS' && before.trick !== null && state.publicHistory.length > before.publicHistory.length) {
-        const seat = Object.entries(vm.seats).find(([, s]) => s.playerId === last.playerId)![0] as keyof typeof vm.seatActions;
+        const seat = Object.entries(vm.seats).find(([, s]) => s?.playerId === last.playerId)![0] as keyof typeof vm.seatActions;
         expect(vm.seatActions[seat]).toMatchObject({ kind: 'PASS', label: '不出' });
         checkedPass = true;
       }

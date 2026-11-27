@@ -28,14 +28,14 @@ describe('table view model', () => {
     });
     const vm = buildTableViewModel(state, humanInput());
     expect(vm.seats.bottom.playerId).toBe(0);
-    expect(vm.seats.top.playerId).toBe(2);
-    expect(vm.seats.left.playerId).toBe(1);
-    expect(vm.seats.right.playerId).toBe(3);
+    expect(vm.seats.top!.playerId).toBe(2);
+    expect(vm.seats.left!.playerId).toBe(1);
+    expect(vm.seats.right!.playerId).toBe(3);
     expect(vm.seats.bottom.cards?.map((entry) => entry.id)).toEqual(['human-card']);
-    expect(vm.seats.top.cards).toBeUndefined();
-    expect(vm.seats.left.cards).toBeUndefined();
-    expect(vm.seats.right.cards).toBeUndefined();
-    expect(vm.seats.top.remaining).toBe(1);
+    expect(vm.seats.top!.cards).toBeUndefined();
+    expect(vm.seats.left!.cards).toBeUndefined();
+    expect(vm.seats.right!.cards).toBeUndefined();
+    expect(vm.seats.top!.remaining).toBe(1);
     expect(JSON.stringify(vm)).not.toContain('top-secret');
     expect(JSON.stringify(vm)).not.toContain('left-secret');
     expect(JSON.stringify(vm)).not.toContain('right-secret');
@@ -71,7 +71,7 @@ describe('table view model', () => {
       currentPlay: group(tableFives, 1, 1), holderId: 1,
     });
     const vm = buildTableViewModel(state, humanInput());
-    expect(vm.seats.left.reportCount).toBe(3);
+    expect(vm.seats.left!.reportCount).toBe(3);
     expect(vm.center.patternLabel).toBe('轰');
   });
 

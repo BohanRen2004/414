@@ -1,6 +1,6 @@
 import { Card, PlayerId, TeamId } from '../../client/assets/scripts/core/cards/card';
-import { createDoubleDeck, DeckCount } from '../../client/assets/scripts/core/cards/deck';
-import { deckOption } from '../../client/assets/scripts/ui/deck-options';
+import { createDoubleDeck, DeckCount, PlayerCount } from '../../client/assets/scripts/core/cards/deck';
+import { deckOption, playerOption } from '../../client/assets/scripts/ui/deck-options';
 import {
   HISTORY_ACTION_LABEL, errorMessage, formatSeed, phaseMessage, playerName, rankLabel, sortCardsForDisplay,
 } from '../../client/assets/scripts/ui/labels';
@@ -12,6 +12,7 @@ import { BrowserSessionSnapshot } from '../../web/src/browser-session';
 export type ActionId =
   | 'hint' | 'clear' | 'pass' | 'play' | 'confirm-goucha' | 'decline-goucha'
   | 'replay' | 'new-game' | 'help' | 'close-help' | 'start' | 'deck-1' | 'deck-2'
+  | 'players-2' | 'players-3' | 'players-4'
   // Online play.
   | 'create-room' | 'join-room' | 'invite' | 'leave-room' | 'start-online' | 'room-lobby'
   | 'auto-on' | 'auto-off' | 'seat-0' | 'seat-1' | 'seat-2' | 'seat-3'
@@ -61,12 +62,16 @@ export interface ZoneScreen {
 }
 
 export interface CounterScreen {
+  /** Whose cards the counts are: "三家还剩", or with two players "对手或扣牌". */
+  readonly subtitle: string;
   readonly entries: readonly { readonly label: string; readonly unseen: number }[];
 }
 
 /** Table tools the app keeps outside the game session. */
 export interface TableUi {
   readonly counterOpen?: boolean;
+  /** The table size picked for the next offline game. */
+  readonly playerCount?: PlayerCount;
   readonly muted?: boolean;
 }
 
@@ -80,6 +85,7 @@ export interface ResultScreen {
 }
 
 export interface StartScreen {
+  readonly playerCount: PlayerCount;
   readonly deckCount: DeckCount;
   readonly summary: string;
   /** Whether the create/join room buttons are offered (cloud development is available). */
@@ -126,12 +132,14 @@ export interface OnlineTableInfo {
 }
 
 /** Seat names online: "你", a friend's nickname, or the AI by where it sits. */
-function onlineName(room: RoomView, viewerId: PlayerId): (playerId: PlayerId) => string {
+function onlineName(room: RoomView, viewerId: PlayerId, playerCount: number): (playerId: PlayerId) => string {
   return (playerId) => {
     const seat = room.seats[playerId];
     if (playerId === viewerId) return '你';
     if (seat.kind === 'human') return seat.name;
-    const offset = (playerId - viewerId + 4) % 4;
+    const offset = (playerId - viewerId + playerCount) % playerCount;
+    if (playerCount === 2) return '对手AI';
+    if (playerCount === 3) return offset === 1 ? '左家AI' : '右家AI';
     return offset === 2 ? '搭档AI' : offset === 1 ? '左家AI' : '右家AI';
   };
 }
@@ -173,22 +181,25 @@ export function buildTableScreen(
   const deckCount = state.deckCount ?? chosenDeckCount;
   const option = deckOption(deckCount);
   const viewerId = viewModel.seats.bottom.playerId;
-  const name = online === null ? playerName : onlineName(online.room, viewerId);
-  const seats = POSITIONS.map((position): SeatScreen => {
+  const players = state.playerCount;
+  const teams = players === 4;
+  const name = online === null ? (playerId: PlayerId) => playerName(playerId, players) : onlineName(online.room, viewerId, players);
+  const seats = POSITIONS.flatMap((position): SeatScreen[] => {
     const seat = viewModel.seats[position];
+    if (seat === null) return [];
     const occupant = online?.room.seats[seat.playerId];
-    return {
+    return [{
       position,
       playerId: seat.playerId,
       name: name(seat.playerId),
-      badge: occupant === undefined ? (position === 'top' ? '搭' : 'AI')
+      badge: occupant === undefined ? (position === 'top' && teams ? '搭' : 'AI')
         : occupant.kind === 'human' ? [...occupant.name][0] ?? '?' : 'AI',
       team: seat.teamId,
       remaining: seat.remaining,
       report: seat.reportCount,
       place: seat.finishPlace,
       active: state.currentPlayer === seat.playerId,
-    };
+    }];
   });
 
   const center = viewModel.center;
@@ -200,13 +211,17 @@ export function buildTableScreen(
 
   const finished = viewModel.result;
   const result: ResultScreen | null = finished === null ? null : {
-    title: online === null
-      ? (finished.winningTeam === 0 ? '蓝队拿下这局' : '金队拿下这局')
-      : (finished.winningTeam === viewerId % 2 ? '你们队拿下这局' : '对方拿下这局'),
-    subtitle: `抓 ${finished.capturedOpponents} 人 · ${option.label} · 种子 ${formatSeed(finished.seed)}`,
-    places: finished.places.map((playerId) => ({
+    title: !teams
+      ? (finished.places[0] === viewerId ? '你赢了这局' : `${name(finished.places[0]!)}先出完`)
+      : online === null
+        ? (finished.winningTeam === 0 ? '蓝队拿下这局' : '金队拿下这局')
+        : (finished.winningTeam === viewerId % 2 ? '你们队拿下这局' : '对方拿下这局'),
+    subtitle: teams
+      ? `抓 ${finished.capturedOpponents} 人 · ${option.label} · 种子 ${formatSeed(finished.seed)}`
+      : `${players} 人 · 一副牌 · 种子 ${formatSeed(finished.seed)}`,
+    places: finished.places.map((playerId, index) => ({
       name: name(playerId),
-      winning: playerId % 2 === finished.winningTeam,
+      winning: teams ? playerId % 2 === finished.winningTeam : index === 0,
     })),
     buttons: online === null
       ? [
@@ -241,7 +256,7 @@ export function buildTableScreen(
         { id: 'leave-room', label: '离开', enabled: !snapshot.isBusy, style: 'quiet' },
       ];
   return {
-    topLabel: online === null ? `4A4 · ${option.label}` : `4A4 · 房间 ${online.room.code}`,
+    topLabel: online === null ? `4A4 · ${players} 人 · ${option.label}` : `4A4 · 房间 ${online.room.code}`,
     seedLabel: online === null ? `种子 ${formatSeed(state.rootSeed ?? seed)}` : option.label,
     topButtons,
     seats,
@@ -282,7 +297,10 @@ export function buildTableScreen(
       }];
     })) as unknown as TableScreen['zones'],
     counter: ui.counterOpen === true && started
-      ? { entries: viewModel.cardCounter.map((entry) => ({ label: entry.label, unseen: entry.unseen })) }
+      ? {
+          subtitle: players === 2 ? '对手或扣牌' : players === 3 ? '两家还剩' : '三家还剩',
+          entries: viewModel.cardCounter.map((entry) => ({ label: entry.label, unseen: entry.unseen })),
+        }
       : null,
     caption: online?.auto === true ? '托管中：AI 正在替你出牌，点「取消托管」接回' : prompt !== null
       ? `${prompt.addition === 'CHA' ? '岔' : '勾'} ${rankLabel(prompt.rank)}：${prompt.addition === 'CHA' ? '选两张同点数的牌' : '选一张同点数的牌'}`
@@ -290,7 +308,9 @@ export function buildTableScreen(
     // Picking cards before one's turn is fine; the play button simply stays off until then.
     error: errorMessage((viewModel.controls.errorKey === 'rule.not_current_player' ? null : viewModel.controls.errorKey) ?? snapshot.errorCode),
     buttons: state.phase === 'SETUP' || state.phase === 'ROUND_RESULT' || online?.auto === true ? [] : playButtons(snapshot),
-    start: state.phase === 'SETUP' && online === null ? { deckCount, summary: option.summary, online: canGoOnline } : null,
+    start: state.phase === 'SETUP' && online === null
+      ? { playerCount: ui.playerCount ?? 4, deckCount, summary: (ui.playerCount ?? 4) === 4 ? option.summary : playerOption(ui.playerCount!).summary, online: canGoOnline }
+      : null,
     result,
     showCopy: deckCount === 2,
   };

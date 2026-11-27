@@ -24,6 +24,8 @@ export function toWireState(state: GameState, viewerId: PlayerId): WireState {
     ...visible,
     rootSeed: finished ? visible.rootSeed : null,
     randomState: null,
+    // Set-aside cards (two players) stay hidden for good.
+    buriedCardIds: [],
     players: visible.players.map((player): WirePlayer => ({
       ...player,
       hand: player.playerId === viewerId ? player.hand : [],

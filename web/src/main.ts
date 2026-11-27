@@ -1,7 +1,7 @@
 import { Card, Rank } from '../../client/assets/scripts/core/cards/card';
-import { createDoubleDeck, DEFAULT_DECK_COUNT, DeckCount } from '../../client/assets/scripts/core/cards/deck';
+import { createDoubleDeck, DEFAULT_DECK_COUNT, DeckCount, PlayerCount } from '../../client/assets/scripts/core/cards/deck';
 import { recognize } from '../../client/assets/scripts/core/patterns/recognize';
-import { DECK_OPTIONS, deckOption } from '../../client/assets/scripts/ui/deck-options';
+import { DECK_OPTIONS, PLAYER_OPTIONS, deckOption, playerOption } from '../../client/assets/scripts/ui/deck-options';
 import { dragSelection } from '../../client/assets/scripts/ui/hand-selection';
 import {
   SUIT_GLYPH, errorMessage, formatSeed, isRedCard, phaseMessage, playerName, rankLabel, sortCardsForDisplay,
@@ -31,7 +31,9 @@ let notice = '';
 let noticeTimer: number | undefined;
 /** Version picked on the start screen; "同种子重开" and "新开一局" keep it. */
 let chosenDeckCount: DeckCount = readDeckCountFromUrl() ?? DEFAULT_DECK_COUNT;
-let session = new BrowserGameSession(readSeedFromUrl() ?? 414, { deckCount: chosenDeckCount, animationDelayMs: MOVE_DELAY_MS });
+/** Table size picked on the start screen (you included). */
+let chosenPlayerCount: PlayerCount = readPlayerCountFromUrl() ?? 4;
+let session = newSession(readSeedFromUrl() ?? 414, chosenDeckCount, chosenPlayerCount);
 /** When each seat's shown action first appeared, so re-renders continue its landing animation instead of restarting it. */
 const landed = new Map<Position, { key: number; at: number }>();
 let flash: { text: string; at: number } | null = null;
@@ -53,6 +55,11 @@ function readSeedFromUrl(): number | null {
   if (value === null || !/^\d{1,10}$/.test(value)) return null;
   const seed = Number(value);
   return Number.isSafeInteger(seed) && seed >= 0 && seed <= 0xffff_ffff ? seed : null;
+}
+
+function readPlayerCountFromUrl(): PlayerCount | null {
+  const value = new URLSearchParams(window.location.search).get('players');
+  return value === '2' ? 2 : value === '3' ? 3 : value === '4' ? 4 : null;
 }
 
 function readDeckCountFromUrl(): DeckCount | null {
@@ -115,10 +122,21 @@ function renderCard(card: Card, options: { size?: 'hand' | 'mini'; copy?: boolea
     <span class="card-corner">${corner}</span><span class="card-pip">${joker ? '★' : glyph}</span>${copy}</span>`;
 }
 
-const SEAT_LETTER: Readonly<Record<number, string>> = { 0: '你', 1: '左', 2: '搭', 3: '右' };
+/** The letter in each seat's avatar, by table size. */
+function seatLetter(playerId: number, playerCount: number): string {
+  if (playerId === 0) return '你';
+  if (playerCount === 2) return '对';
+  if (playerCount === 3) return playerId === 1 ? '左' : '右';
+  return ['你', '左', '搭', '右'][playerId]!;
+}
+
+function seatName(snapshot: BrowserSessionSnapshot, playerId: number): string {
+  return playerName(playerId, snapshot.state.playerCount);
+}
 
 function renderSeat(position: Position, snapshot: BrowserSessionSnapshot): string {
   const seat = snapshot.viewModel.seats[position];
+  if (seat === null) return '';
   const active = snapshot.state.currentPlayer === seat.playerId && snapshot.state.phase !== 'ROUND_RESULT';
   const out = seat.finishPlace !== null;
   const badges = [
@@ -126,10 +144,10 @@ function renderSeat(position: Position, snapshot: BrowserSessionSnapshot): strin
     out ? `<span class="seat-place">第 ${seat.finishPlace} 名</span>` : '',
   ].join('');
   return `<section class="seat seat-${position} team-${seat.teamId} ${active ? 'is-active' : ''} ${out ? 'is-out' : ''}"
-      aria-label="${escapeHtml(playerName(seat.playerId))}，剩 ${seat.remaining} 张">
-    <div class="avatar">${SEAT_LETTER[seat.playerId]}${active ? '<span class="thinking" aria-hidden="true"><i></i><i></i><i></i></span>' : ''}</div>
+      aria-label="${escapeHtml(seatName(snapshot, seat.playerId))}，剩 ${seat.remaining} 张">
+    <div class="avatar">${seatLetter(seat.playerId, snapshot.state.playerCount)}${active ? '<span class="thinking" aria-hidden="true"><i></i><i></i><i></i></span>' : ''}</div>
     <div class="seat-info">
-      <strong>${escapeHtml(playerName(seat.playerId))}</strong>
+      <strong>${escapeHtml(seatName(snapshot, seat.playerId))}</strong>
       <span class="seat-count"><span class="card-back" aria-hidden="true"></span>${seat.remaining}</span>
       ${badges}
     </div>
@@ -178,7 +196,7 @@ function renderCounter(snapshot: BrowserSessionSnapshot): string {
   const entries = snapshot.viewModel.cardCounter;
   if (entries.length === 0) return '';
   return `<section class="counter" aria-label="记牌器：其他三家手里还剩的牌">
-    <div class="counter-title">记牌器<small>三家还剩</small></div>
+    <div class="counter-title">记牌器<small>${snapshot.state.playerCount === 2 ? '对手或扣牌' : snapshot.state.playerCount === 3 ? '两家还剩' : '三家还剩'}</small></div>
     <ol>${entries.map((entry) => `<li class="${entry.unseen === 0 ? 'is-gone' : ''}"><b>${escapeHtml(entry.label)}</b><span>${entry.unseen}</span></li>`).join('')}</ol>
   </section>`;
 }
@@ -188,7 +206,7 @@ function renderBar(snapshot: BrowserSessionSnapshot): string {
   const seed = snapshot.state.rootSeed ?? session.seed;
   const option = deckOption(shownDeckCount(snapshot));
   return `<header class="bar">
-    <div class="bar-title"><span class="logo">4<i>A</i>4</span><span class="bar-meta">${escapeHtml(option.label)} · 种子 ${escapeHtml(formatSeed(seed))}</span></div>
+    <div class="bar-title"><span class="logo">4<i>A</i>4</span><span class="bar-meta">${snapshot.state.playerCount} 人 · ${escapeHtml(option.label)} · 种子 ${escapeHtml(formatSeed(seed))}</span></div>
     <nav class="bar-actions" aria-label="游戏工具">
       <button class="chip ${counterOpen ? 'is-on' : ''}" data-action="counter" ${started ? '' : 'disabled'} aria-pressed="${counterOpen}">记牌器</button>
       <button class="chip" data-action="sound" aria-pressed="${!isMuted()}">${isMuted() ? '音效 关' : '音效 开'}</button>
@@ -273,11 +291,17 @@ function renderFlash(): string {
 }
 
 function renderDeckChoice(): string {
-  const options = DECK_OPTIONS.map((option) => `<label class="deck-option">
+  const players = PLAYER_OPTIONS.map((option) => `<label class="deck-option">
+      <input type="radio" name="players" value="${option.playerCount}" ${option.playerCount === chosenPlayerCount ? 'checked' : ''} />
+      <span class="deck-option-body"><b>${escapeHtml(option.label)}</b><small>${escapeHtml(option.summary)}</small></span>
+    </label>`).join('');
+  // Only a four-player table offers two decks.
+  const decks = DECK_OPTIONS.map((option) => `<label class="deck-option">
       <input type="radio" name="deck" value="${option.deckCount}" ${option.deckCount === chosenDeckCount ? 'checked' : ''} />
       <span class="deck-option-body"><b>${escapeHtml(option.label)}</b><small>${escapeHtml(option.summary)}</small></span>
     </label>`).join('');
-  return `<div class="deck-options" role="radiogroup" aria-label="牌数">${options}</div>`;
+  return `<div class="deck-options player-options" role="radiogroup" aria-label="人数">${players}</div>
+    <div class="deck-options" role="radiogroup" aria-label="牌数" ${chosenPlayerCount === 4 ? '' : 'hidden'}>${decks}</div>`;
 }
 
 function renderStart(snapshot: BrowserSessionSnapshot): string {
@@ -285,8 +309,8 @@ function renderStart(snapshot: BrowserSessionSnapshot): string {
   return `<div class="modal"><section class="panel start-panel" role="dialog" aria-modal="true" aria-labelledby="start-title">
     <div class="start-hero">
       <div class="logo logo-big">4<i>A</i>4</div>
-      <h1 id="start-title">四人两队，和三位 AI 打一局</h1>
-      <p>你和对面的搭档一队。先出完的一方获胜，抓的人越多赢得越漂亮。</p>
+      <h1 id="start-title">和 AI 打一局</h1>
+      <p>四人是两队：你和对面的搭档一队，抓的人越多赢得越漂亮。两三人时各打各的，谁先出完谁赢。</p>
     </div>
     <form id="start-form" class="start-form">
       ${renderDeckChoice()}
@@ -304,13 +328,17 @@ function renderStart(snapshot: BrowserSessionSnapshot): string {
 function renderResult(snapshot: BrowserSessionSnapshot): string {
   const result = snapshot.viewModel.result;
   if (result === null) return '';
+  const teams = snapshot.state.playerCount === 4;
   const won = result.winningTeam === 0;
-  const order = result.places.map((playerId, index) => `<li class="${playerId % 2 === result.winningTeam ? 'is-winner' : ''}">
-      <span class="place">第 ${index + 1} 名</span><span>${escapeHtml(playerName(playerId))}</span></li>`).join('');
+  const winner = result.places[0]!;
+  const order = result.places.map((playerId, index) => `<li class="${(teams ? playerId % 2 === result.winningTeam : index === 0) ? 'is-winner' : ''}">
+      <span class="place">第 ${index + 1} 名</span><span>${escapeHtml(seatName(snapshot, playerId))}</span></li>`).join('');
+  const title = teams ? (won ? '你们队拿下这局！' : '对方拿下这局') : (won ? '你赢了！' : `${seatName(snapshot, winner)}先出完`);
+  const sub = teams ? `抓了 ${result.capturedOpponents} 人 · ${deckOption(shownDeckCount(snapshot)).label}` : `${snapshot.state.playerCount} 人 · 一副牌`;
   return `<div class="modal"><section class="panel result-panel ${won ? 'is-win' : 'is-lose'}" role="dialog" aria-modal="true" aria-labelledby="result-title">
     <div class="result-ribbon">${won ? '胜利' : '惜败'}</div>
-    <h2 id="result-title">${won ? '你们队拿下这局！' : '对方拿下这局'}</h2>
-    <p class="result-sub">抓了 ${result.capturedOpponents} 人 · ${escapeHtml(deckOption(shownDeckCount(snapshot)).label)} · 种子 ${escapeHtml(formatSeed(result.seed))}</p>
+    <h2 id="result-title">${escapeHtml(title)}</h2>
+    <p class="result-sub">${escapeHtml(sub)} · 种子 ${escapeHtml(formatSeed(result.seed))}</p>
     <ol class="result-order">${order}</ol>
     <div class="result-actions">
       <button class="btn btn-hint" data-action="replay">同种子重开</button>
@@ -326,7 +354,7 @@ function renderHelp(): string {
       <button class="close" data-action="close-help" aria-label="关闭规则">×</button>
       <h2 id="help-title">规则速览</h2>
       <div class="rules">
-        <article><b>队伍</b><span>四人两队：你和对面的搭档一队，左右两家一队。两副牌每人 27 张；一副牌 54 张，每队一人 14 张、一人 13 张。</span></article>
+        <article><b>队伍</b><span>四人两队：你和对面的搭档一队，左右两家一队。两副牌每人 27 张；一副牌 54 张，每队一人 14 张、一人 13 张。三人或两人时各打各的，只用一副牌：三人每人 18 张；两人每人 22 张，另扣 10 张谁也看不到。</span></article>
         <article><b>首家</b><span>持红桃 3 的玩家先出。两副牌时依次比较红桃 3、黑桃 3、梅花 3、方块 3 的张数，多者先出。</span></article>
         <article><b>牌型</b><span>单张、对子、单/双/三顺、轰（3 张）/炸弹（4 张以上）、王炸、4A4（两张 4 加一张 A，最大）。</span></article>
         <article><b>出牌</b><span>轮流压过上一手或选择不出；其他人都不要时，最后压住的人接着出，他已出完就由搭档接着出（借光）。</span></article>
@@ -411,20 +439,22 @@ function replaceSession(next: BrowserGameSession): void {
   flash = null;
   session = next;
   chosenDeckCount = next.deckCount;
+  chosenPlayerCount = next.playerCount;
   unsubscribe = session.subscribe(onSnapshot);
   // Keep the seed in the address so a game can be shared; embedded pages may refuse this, which is harmless.
   try {
     const url = new URL(window.location.href);
     url.searchParams.set('seed', String(next.seed));
     url.searchParams.set('decks', String(next.deckCount));
+    url.searchParams.set('players', String(next.playerCount));
     window.history.replaceState({}, '', url);
   } catch {
     // The game works the same without it.
   }
 }
 
-function newSession(seed: number, deckCount: DeckCount): BrowserGameSession {
-  return new BrowserGameSession(seed, { deckCount, animationDelayMs: MOVE_DELAY_MS });
+function newSession(seed: number, deckCount: DeckCount, playerCount: PlayerCount): BrowserGameSession {
+  return new BrowserGameSession(seed, { deckCount, playerCount, animationDelayMs: MOVE_DELAY_MS });
 }
 
 function parseInputSeed(input: HTMLInputElement | null): number | null {
@@ -451,7 +481,9 @@ root.addEventListener('submit', async (event) => {
   }
   const deck = form.querySelector<HTMLInputElement>('input[name="deck"]:checked');
   if (deck !== null) chosenDeckCount = deck.value === '1' ? 1 : 2;
-  replaceSession(newSession(seed, chosenDeckCount));
+  const players = form.querySelector<HTMLInputElement>('input[name="players"]:checked');
+  if (players !== null) chosenPlayerCount = players.value === '2' ? 2 : players.value === '3' ? 3 : 4;
+  replaceSession(newSession(seed, chosenDeckCount, chosenPlayerCount));
   const started = await session.start();
   if (!started) setNotice(`无法开始游戏：${session.lastErrorCode ?? '未知错误'}`);
 });
@@ -602,7 +634,7 @@ root.addEventListener('click', async (event) => {
     return;
   }
   if (action === 'new-game') {
-    replaceSession(newSession(Date.now() >>> 0, session.deckCount));
+    replaceSession(newSession(Date.now() >>> 0, session.deckCount, session.playerCount));
     return;
   }
 });
@@ -610,8 +642,14 @@ root.addEventListener('click', async (event) => {
 // Switching the version on the start screen keeps the form as typed.
 root.addEventListener('change', (event) => {
   const input = event.target;
-  if (!(input instanceof HTMLInputElement) || input.name !== 'deck' || !input.checked) return;
-  chosenDeckCount = input.value === '1' ? 1 : 2;
+  if (!(input instanceof HTMLInputElement) || !input.checked) return;
+  if (input.name === 'deck') chosenDeckCount = input.value === '1' ? 1 : 2;
+  if (input.name === 'players') {
+    chosenPlayerCount = input.value === '2' ? 2 : input.value === '3' ? 3 : 4;
+    // The deck choice only applies to four players.
+    const decks = root.querySelector<HTMLElement>('.deck-options[aria-label="牌数"]');
+    if (decks !== null) decks.hidden = chosenPlayerCount !== 4;
+  }
 });
 
 root.addEventListener('keydown', async (event) => {

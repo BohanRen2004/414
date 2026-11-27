@@ -442,7 +442,7 @@ describe('game state invariants', () => {
     const log = formatDiagnosticLog([{
       level: 'ERROR',
       seed: 414,
-      rulesVersion: '1.2.0',
+      rulesVersion: '1.3.0',
       deckCount: 1,
       actionNumber: 7,
       phase: 'GOUCHA_QUERY',
@@ -450,7 +450,7 @@ describe('game state invariants', () => {
       code: 'PHASE_TRICK_MISMATCH',
       details: { zeta: true, alpha: 'gou-cha' },
     }]);
-    expect(log).toBe('{"seed":414,"rulesVersion":"1.2.0","deckCount":1,"actionNumber":7,"phase":"GOUCHA_QUERY","playerId":2,"code":"PHASE_TRICK_MISMATCH","details":{"alpha":"gou-cha","zeta":true},"level":"ERROR"}');
+    expect(log).toBe('{"seed":414,"rulesVersion":"1.3.0","deckCount":1,"actionNumber":7,"phase":"GOUCHA_QUERY","playerId":2,"code":"PHASE_TRICK_MISMATCH","details":{"alpha":"gou-cha","zeta":true},"level":"ERROR"}');
     expect(formatDiagnosticLog([])).toBe('');
   });
 });

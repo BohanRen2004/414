@@ -85,6 +85,20 @@ describe('WeChat mini game app', () => {
     expect(host.canvas.texts.some((value) => value.includes('拿下这局'))).toBe(true);
   });
 
+  it.each([3, 2] as const)('plays a complete %i-player game by tapping the screen', async (players) => {
+    const host = platform();
+    const app = new MiniGameApp(host, { animationDelayMs: 0 });
+    app.render();
+    expect(await tapAction(app, `players-${players}`)).toBe(true);
+    // Fewer than four players: no deck choice, one deck.
+    expect(regionFor(app, 'deck-2')).toBeUndefined();
+    expect(app.current.playerCount).toBe(players);
+    await playByTaps(app);
+    expect(app.current.state.result?.finishOrder).toHaveLength(players);
+    expect(host.canvas.texts.some((value) => value.includes('先出完') || value.includes('你赢了'))).toBe(true);
+    expect(host.canvas.numbers.every(Number.isFinite)).toBe(true);
+  });
+
   it('selects a hand card by tapping it and the same seed replays the same game', async () => {
     const app = new MiniGameApp(platform(), { animationDelayMs: 0 });
     app.render();

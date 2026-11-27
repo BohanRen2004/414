@@ -1,6 +1,6 @@
 import { AnimationSink } from '../../client/assets/scripts/app/animation-queue';
 import { GameController } from '../../client/assets/scripts/app/game-controller';
-import { DEFAULT_DECK_COUNT, DeckCount, isDeckCount } from '../../client/assets/scripts/core/cards/deck';
+import { DEFAULT_DECK_COUNT, DeckCount, PlayerCount, isDeckCount, isPlayerCount } from '../../client/assets/scripts/core/cards/deck';
 import { GameEvent } from '../../client/assets/scripts/core/state/game-event';
 import { GameAction } from '../../client/assets/scripts/core/state/game-action';
 import { GameState } from '../../client/assets/scripts/core/state/game-state';
@@ -16,6 +16,8 @@ export interface BrowserGameOptions {
   readonly animationDelayMs?: number;
   /** Game version to start: one deck (54 cards) or two decks (108 cards, the default). */
   readonly deckCount?: DeckCount;
+  /** Players at the table, you included (2, 3 or 4, the default); fewer than four play with one deck. */
+  readonly playerCount?: PlayerCount;
   /** Start from this state instead of an unstarted table (tests and replays). */
   readonly initialState?: GameState;
 }
@@ -54,6 +56,7 @@ export class BrowserGameSession {
 
   /** Game version this session starts; a replay keeps it. */
   public readonly deckCount: DeckCount;
+  public readonly playerCount: PlayerCount;
 
   public constructor(public readonly seed: number, options: BrowserGameOptions = {}) {
     if (!Number.isSafeInteger(seed) || seed < 0 || seed > 0xffff_ffff) {
@@ -63,7 +66,9 @@ export class BrowserGameSession {
     if (!Number.isFinite(this.animationDelayMs) || this.animationDelayMs < 0) {
       throw new RangeError('animationDelayMs must be a nonnegative finite number');
     }
-    this.deckCount = options.deckCount ?? options.initialState?.deckCount ?? DEFAULT_DECK_COUNT;
+    this.playerCount = options.playerCount ?? options.initialState?.playerCount ?? 4;
+    if (!isPlayerCount(this.playerCount)) throw new RangeError('playerCount must be 2, 3 or 4');
+    this.deckCount = this.playerCount === 4 ? options.deckCount ?? options.initialState?.deckCount ?? DEFAULT_DECK_COUNT : 1;
     if (!isDeckCount(this.deckCount)) {
       throw new RangeError('deckCount must be 1 (one deck) or 2 (two decks)');
     }
@@ -113,12 +118,12 @@ export class BrowserGameSession {
   }
 
   public async start(): Promise<boolean> {
-    return this.dispatch({ kind: 'START_GAME', seed: this.seed, deckCount: this.deckCount });
+    return this.dispatch({ kind: 'START_GAME', seed: this.seed, deckCount: this.deckCount, playerCount: this.playerCount });
   }
 
   /** A new, unstarted session for "同种子重开": the same seed, deck version and pacing, so it deals the same game. */
   public replay(): BrowserGameSession {
-    return new BrowserGameSession(this.seed, { animationDelayMs: this.animationDelayMs, deckCount: this.deckCount });
+    return new BrowserGameSession(this.seed, { animationDelayMs: this.animationDelayMs, deckCount: this.deckCount, playerCount: this.playerCount });
   }
 
   public toggleCard(cardId: string): void {

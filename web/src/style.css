@@ -85,6 +85,9 @@ html.rotated #app { position: fixed; top: 0; left: 0; transform-origin: top left
 .avatar { position: relative; width: var(--avatar); height: var(--avatar); flex: none; display: grid; place-items: center; border: 2px solid rgb(255 255 255 / 85%); border-radius: 50%; font-size: calc(var(--avatar) * 0.42); font-weight: 900; box-shadow: 0 3px 8px rgb(0 0 0 / 30%); }
 .team-0 .avatar { background: linear-gradient(160deg, #62a8f5, var(--team-0)); }
 .team-1 .avatar { background: linear-gradient(160deg, #f0bf55, var(--team-1)); }
+/* Two or three players play alone: the third seat gets its own colour. */
+.team-2 .avatar { background: linear-gradient(160deg, #c58be8, #8a4cc0); }
+.team-3 .avatar { background: linear-gradient(160deg, #f08a7a, #c5483b); }
 .seat.is-active .avatar { border-color: var(--gold); animation: pulse 1.2s ease-in-out infinite; }
 .thinking { position: absolute; right: -10px; top: -8px; display: flex; gap: 2px; padding: 3px 5px; border-radius: 8px; background: #ffffff; }
 .thinking i { width: 4px; height: 4px; border-radius: 50%; background: #2a6a47; animation: blink 1s infinite; }
@@ -196,6 +199,8 @@ html.rotated #app { position: fixed; top: 0; left: 0; transform-origin: top left
 .start-hero p { margin: 0; color: #4d6a59; font-size: 13px; line-height: 1.7; }
 .start-form { display: flex; flex-direction: column; gap: 10px; }
 .deck-options { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.player-options { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.deck-options[hidden] { display: none; }
 .deck-option { position: relative; cursor: pointer; }
 .deck-option input { position: absolute; opacity: 0; pointer-events: none; }
 .deck-option-body { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px; border: 2px solid #d9cfb4; border-radius: 12px; background: #ffffff; }

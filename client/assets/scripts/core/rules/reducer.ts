@@ -1,5 +1,5 @@
 import { PlayerId } from '../cards/card';
-import { DEFAULT_DECK_COUNT, dealFourPlayers, isDeckCount } from '../cards/deck';
+import { DEFAULT_DECK_COUNT, PlayerCount, dealPlayers, isDeckCount, isPlayerCount } from '../cards/deck';
 import { GameAction } from '../state/game-action';
 import { GameEvent } from '../state/game-event';
 import { GameState, PlayerState } from '../state/game-state';
@@ -14,10 +14,11 @@ export type ActionResult =
 
 const seatIds = [0, 1, 2, 3] as const satisfies readonly PlayerId[];
 
-function createPlayer(playerId: PlayerId, hand: PlayerState['hand'] = []): PlayerState {
+/** Four players: seats 0+2 and 1+3 are teams. Fewer: everyone plays alone. */
+function createPlayer(playerId: PlayerId, hand: PlayerState['hand'] = [], playerCount: PlayerCount = 4): PlayerState {
   return {
     playerId,
-    teamId: (playerId % 2) as 0 | 1,
+    teamId: playerCount === 4 ? (playerId % 2) as 0 | 1 : playerId,
     controlType: playerId === 0 ? 'HUMAN' : 'BASIC_AI',
     hand,
     finishPlace: null,
@@ -27,10 +28,12 @@ function createPlayer(playerId: PlayerId, hand: PlayerState['hand'] = []): Playe
 
 export function createSetupState(): GameState {
   return {
-    rulesVersion: '1.2.0',
+    rulesVersion: '1.3.0',
     phase: 'SETUP',
     rootSeed: null,
     deckCount: null,
+    playerCount: 4,
+    buriedCardIds: [],
     randomState: null,
     firstPlayer: null,
     players: [createPlayer(0), createPlayer(1), createPlayer(2), createPlayer(3)],
@@ -47,18 +50,25 @@ export function createSetupState(): GameState {
 function startGame(state: GameState, action: Extract<GameAction, { kind: 'START_GAME' }>): ActionResult {
   if (state.phase !== 'SETUP') return { ok: false, error: ruleError('WRONG_PHASE') };
   const { seed } = action;
-  const deckCount = action.deckCount ?? DEFAULT_DECK_COUNT;
-  if (!isDeckCount(deckCount)) {
+  const playerCount = action.playerCount ?? 4;
+  if (!isPlayerCount(playerCount)) {
+    return { ok: false, error: ruleError('INVALID_PLAYER_COUNT', { playerCount: String(playerCount) }) };
+  }
+  // Fewer than four players always play with one deck.
+  const deckCount = action.deckCount ?? (playerCount === 4 ? DEFAULT_DECK_COUNT : 1);
+  if (!isDeckCount(deckCount) || (playerCount !== 4 && deckCount !== 1)) {
     return { ok: false, error: ruleError('INVALID_DECK_COUNT', { deckCount: String(deckCount) }) };
   }
 
-  const deal = dealFourPlayers(seed, deckCount);
-  const players = seatIds.map((playerId) => createPlayer(playerId, deal.hands[playerId])) as unknown as GameState['players'];
+  const deal = dealPlayers(seed, deckCount, playerCount);
+  const players = seatIds.map((playerId) => createPlayer(playerId, deal.hands[playerId], playerCount)) as unknown as GameState['players'];
   const started: GameState = {
     ...state,
     phase: 'FREE_LEAD',
     rootSeed: seed,
     deckCount,
+    playerCount,
+    buriedCardIds: deal.buried.map((card) => card.id),
     randomState: { deal: deal.dealStateAfterSetup },
     firstPlayer: deal.firstPlayer,
     players,

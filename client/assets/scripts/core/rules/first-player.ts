@@ -23,7 +23,7 @@ function compareKeys(left: readonly number[], right: readonly number[]): number 
  * With one deck this is always just the ♥3 holder; with two decks a seat holding both ♥3 always wins.
  */
 export function firstPlayerCandidates(hands: readonly (readonly Card[])[]): PlayerId[] {
-  if (hands.length !== 4) throw new RangeError(`expected four hands; received ${hands.length}`);
+  if (hands.length < 2 || hands.length > 4) throw new RangeError(`expected two to four hands; received ${hands.length}`);
   const keys = hands.map(threesKey);
   const best = keys.reduce((top, key) => (compareKeys(key, top) > 0 ? key : top));
   return keys.flatMap((key, seat) => (compareKeys(key, best) === 0 ? [seat as PlayerId] : []));

@@ -1,4 +1,4 @@
-import { DEFAULT_DECK_COUNT, DeckCount } from '../../client/assets/scripts/core/cards/deck';
+import { DEFAULT_DECK_COUNT, DeckCount, PlayerCount } from '../../client/assets/scripts/core/cards/deck';
 import { RoomResponse } from '../../client/assets/scripts/online/protocol';
 import { recognize } from '../../client/assets/scripts/core/patterns/recognize';
 import { createDoubleDeck } from '../../client/assets/scripts/core/cards/deck';
@@ -94,6 +94,8 @@ export class MiniGameApp {
   private transport: RoomTransport | null | undefined;
   private regions: HitRegion[] = [];
   private chosenDeckCount: DeckCount = DEFAULT_DECK_COUNT;
+  /** Table size for offline games (you plus AIs). */
+  private chosenPlayerCount: PlayerCount = 4;
   private helpOpen = false;
   private notice = '';
   private noticeTimer: unknown = null;
@@ -131,7 +133,7 @@ export class MiniGameApp {
   public render(): void {
     const online = this.online;
     const onlineSnapshot = this.onlineSnapshot;
-    const ui = { counterOpen: this.counterOpen, muted: this.muted };
+    const ui = { counterOpen: this.counterOpen, muted: this.muted, playerCount: this.chosenPlayerCount };
     if (online !== null && onlineSnapshot !== null) {
       const room = onlineSnapshot.room;
       if (room.status === 'lobby') {
@@ -345,6 +347,12 @@ export class MiniGameApp {
         this.chosenDeckCount = action === 'deck-1' ? 1 : 2;
         this.replace(this.newSession(this.session.seed));
         return;
+      case 'players-2':
+      case 'players-3':
+      case 'players-4':
+        this.chosenPlayerCount = action === 'players-2' ? 2 : action === 'players-3' ? 3 : 4;
+        this.replace(this.newSession(this.session.seed));
+        return;
       case 'start':
         if (!await this.session.start()) this.flash(`无法开始游戏：${this.session.lastErrorCode ?? '未知错误'}`);
         return;
@@ -502,7 +510,7 @@ export class MiniGameApp {
     }
     this.onlineSnapshot = snapshot;
     const seat = snapshot.room.mySeat;
-    this.react(snapshot.events, seat % 2, snapshot.state.result?.winningTeam ?? null);
+    this.react(snapshot.events, snapshot.state.players[seat].teamId, snapshot.state.result?.winningTeam ?? null);
     if (snapshot.events.some((event) => event.kind === 'TURN_CHANGED' && event.playerId === seat)) this.sound('turn');
     this.render();
     // Keep the countdown moving while it is the player's turn.
@@ -543,6 +551,7 @@ export class MiniGameApp {
     const delay = this.options.animationDelayMs;
     return new BrowserGameSession(seed, {
       deckCount: this.chosenDeckCount,
+      playerCount: this.chosenPlayerCount,
       ...(delay === undefined ? {} : { animationDelayMs: delay }),
     });
   }
@@ -551,7 +560,8 @@ export class MiniGameApp {
     this.unsubscribe();
     this.helpOpen = false;
     this.session = next;
-    this.chosenDeckCount = next.deckCount;
+    this.chosenDeckCount = this.chosenPlayerCount === 4 ? next.deckCount : this.chosenDeckCount;
+    this.chosenPlayerCount = next.playerCount;
     this.snapshot = next.snapshot();
     this.unsubscribe = next.subscribe((snapshot) => this.show(snapshot));
     this.render();

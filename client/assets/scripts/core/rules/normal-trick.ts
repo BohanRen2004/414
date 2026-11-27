@@ -21,7 +21,7 @@ export function nextActivePlayer(players: readonly PlayerState[], after: PlayerI
 
 export function recordFinish(state: GameState, playerId: PlayerId): GameState {
   if (state.finishOrder.includes(playerId)) return state;
-  if (state.finishOrder.length >= 4) return state;
+  if (state.finishOrder.length >= state.playerCount) return state;
   const place = (state.finishOrder.length + 1) as 1 | 2 | 3 | 4;
   const [seat0, seat1, seat2, seat3] = state.players;
   const players: GameState['players'] = [
@@ -48,11 +48,14 @@ function appendAction(
   };
 }
 
-/** The trick winner leads again; a finished winner hands the lead to their partner (借光), else clockwise. */
+/**
+ * The trick winner leads again; a finished winner hands the lead to their partner (借光), else, and always
+ * with no partner (two or three players), to the next player clockwise.
+ */
 export function nextLeadPlayer(players: readonly PlayerState[], holderId: PlayerId): PlayerId | null {
   if (active(players[holderId]!)) return holderId;
   const partnerId = ((holderId + 2) % 4) as PlayerId;
-  if (active(players[partnerId]!)) return partnerId;
+  if (players[partnerId]!.teamId === players[holderId]!.teamId && active(players[partnerId]!)) return partnerId;
   return nextActivePlayer(players, holderId);
 }
 
@@ -100,7 +103,7 @@ export function completeIfDecided(state: GameState, events: GameEvent[]): GameSt
       place: (finished.finishOrder.length) as 1 | 2 | 3 | 4,
     });
   }
-  const result = buildResult(finished.finishOrder);
+  const result = buildResult(finished.finishOrder, state.playerCount);
   events.push({ kind: 'ROUND_FINISHED' });
   return { ...finished, phase: 'ROUND_RESULT', currentPlayer: null, result };
 }

@@ -1,5 +1,5 @@
 import { Card, Rank } from '../../client/assets/scripts/core/cards/card';
-import { DECK_OPTIONS } from '../../client/assets/scripts/ui/deck-options';
+import { DECK_OPTIONS, PLAYER_OPTIONS } from '../../client/assets/scripts/ui/deck-options';
 import { SUIT_GLYPH, isRedCard, rankLabel } from '../../client/assets/scripts/ui/labels';
 import { ActionId, ButtonScreen, LobbyScreen, SeatPosition, SeatScreen, TableScreen, ZoneScreen } from './screen';
 
@@ -86,6 +86,8 @@ const COLOR = {
   red: '#e5483f',
   team0: '#2f7fd8',
   team1: '#c98a1c',
+  team2: '#8a4cc0',
+  team3: '#c5483b',
   cardFace: '#fffdf6',
   cardInk: '#1c1f1d',
   cardRed: '#d0322b',
@@ -98,6 +100,9 @@ const COLOR = {
 } as const;
 
 const FONT = '"PingFang SC", "Microsoft YaHei", sans-serif';
+
+/** Avatar colour per team: blue and gold for the two teams of four, a colour each when playing alone. */
+const TEAM_COLORS: readonly string[] = [COLOR.team0, COLOR.team1, COLOR.team2, COLOR.team3];
 
 function font(size: number, weight = 400): string {
   return `${weight} ${size}px ${FONT}`;
@@ -258,7 +263,7 @@ function drawSeat(ctx: Canvas2D, seat: SeatScreen, at: SeatLayout, scale: number
   }
   ctx.beginPath();
   ctx.arc(x, y, r, 0, Math.PI * 2);
-  ctx.fillStyle = seat.team === 0 ? COLOR.team0 : COLOR.team1;
+  ctx.fillStyle = TEAM_COLORS[seat.team] ?? COLOR.team0;
   ctx.fill();
   ctx.lineWidth = 2;
   ctx.strokeStyle = seat.active ? COLOR.gold : 'rgba(255,255,255,0.85)';
@@ -373,25 +378,33 @@ function drawStart(ctx: Canvas2D, view: Viewport, screen: TableScreen, regions: 
   panel(ctx, r);
   const pad = 22;
   const logoW = drawLogo(ctx, r.x + pad, r.y + 38, 34, true);
-  text(ctx, fit(ctx, start.online ? '四人两队 · 单人练习或和好友联机' : '四人两队 · 和三位 AI 打一局', 13, w - pad * 2 - logoW - 14),
+  text(ctx, fit(ctx, start.online ? '单人练习或和好友联机' : '和 AI 打一局', 13, w - pad * 2 - logoW - 14),
     r.x + pad + logoW + 14, r.y + 40, 13, COLOR.panelMuted);
-  const optionY = r.y + 72;
-  const optionW = (w - pad * 2 - 10) / 2;
-  DECK_OPTIONS.forEach((option, index) => {
-    const box = { x: r.x + pad + index * (optionW + 10), y: optionY, w: optionW, h: 60 };
-    const chosen = option.deckCount === start.deckCount;
+  const option = (box: Rect, label: string, chosen: boolean, action: ActionId) => {
     roundRect(ctx, box, 12);
     ctx.fillStyle = chosen ? '#fff0c4' : '#ffffff';
     ctx.fill();
     ctx.lineWidth = 2;
     ctx.strokeStyle = chosen ? COLOR.goldDeep : COLOR.panelLine;
     ctx.stroke();
-    text(ctx, option.label, box.x + 14, box.y + 21, 16, COLOR.panelInk, 'left', 800);
-    text(ctx, fit(ctx, option.summary, 11, box.w - 24), box.x + 14, box.y + 43, 11, COLOR.panelMuted);
-    regions.push({ rect: box, action: option.deckCount === 1 ? 'deck-1' : 'deck-2' });
-  });
-  text(ctx, fit(ctx, start.online ? '单人练习和三位 AI 打；房间可以邀请微信好友，空位 AI 补' : `${start.summary} · 持红桃 3 的玩家先出`, 11, w - pad * 2),
-    r.x + pad, optionY + 78, 11, COLOR.panelMuted);
+    text(ctx, label, box.x + box.w / 2, box.y + box.h / 2, 15, COLOR.panelInk, 'center', 800);
+    regions.push({ rect: box, action });
+  };
+  // Table size, then (four players only) one deck or two.
+  const rowH = 38;
+  const playersY = r.y + 66;
+  const playerW = (w - pad * 2 - 20) / 3;
+  PLAYER_OPTIONS.forEach((choice, index) => option(
+    { x: r.x + pad + index * (playerW + 10), y: playersY, w: playerW, h: rowH },
+    choice.playerCount === 4 ? '4 人 · 两队' : `${choice.playerCount} 人 · 各打各`, choice.playerCount === start.playerCount, `players-${choice.playerCount}`));
+  const decksY = playersY + rowH + 10;
+  if (start.playerCount === 4) {
+    const deckW = (w - pad * 2 - 10) / 2;
+    DECK_OPTIONS.forEach((choice, index) => option(
+      { x: r.x + pad + index * (deckW + 10), y: decksY, w: deckW, h: rowH },
+      choice.label, choice.deckCount === start.deckCount, choice.deckCount === 1 ? 'deck-1' : 'deck-2'));
+  }
+  text(ctx, fit(ctx, start.summary, 11, w - pad * 2), r.x + pad, (start.playerCount === 4 ? decksY + rowH : decksY) + 14, 11, COLOR.panelMuted);
   const buttonH = 42;
   const buttonY = r.y + h - pad - buttonH - 4;
   const rowButtons: ButtonScreen[] = [
@@ -584,7 +597,7 @@ export function drawFrame(ctx: Canvas2D, view: Viewport, screen: TableScreen, ov
       const y = stageTop - 2;
       fillRound(ctx, { x, y, w, h: cellH + 8 }, 10, 'rgba(0,30,18,0.78)');
       text(ctx, '记牌器', x + 8, y + cellH / 2 - 2, 11 * scale, COLOR.gold, 'left', 900);
-      text(ctx, '三家还剩', x + 8, y + cellH / 2 + 11 * scale, 8 * scale, COLOR.inkSoft, 'left');
+      text(ctx, screen.counter.subtitle, x + 8, y + cellH / 2 + 11 * scale, 8 * scale, COLOR.inkSoft, 'left');
       entries.forEach((entry, index) => {
         const cx = x + titleW + index * (cellW + 3);
         ctx.globalAlpha = entry.unseen === 0 ? 0.35 : 1;

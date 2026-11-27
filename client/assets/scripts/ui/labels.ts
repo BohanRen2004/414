@@ -39,9 +39,11 @@ export function isRedCard(card: Card): boolean {
   return card.suit === Suit.HEART || card.suit === Suit.DIAMOND || card.rank === Rank.BIG_JOKER;
 }
 
-/** Seat names as seen from the human's seat 0. */
-export function playerName(playerId: PlayerId | number): string {
+/** Seat names as seen from the human's seat 0: a partner across with four players, everyone alone with fewer. */
+export function playerName(playerId: PlayerId | number, playerCount = 4): string {
   if (playerId === 0) return '你';
+  if (playerCount === 2) return '对手';
+  if (playerCount === 3) return playerId === 1 ? '左家' : '右家';
   if (playerId === 2) return '搭档';
   return playerId === 1 ? '左对家' : '右对家';
 }
@@ -62,7 +64,7 @@ export function phaseMessage(
   state: GameState,
   viewModel: TableViewModel,
   isBusy: boolean,
-  name: (playerId: PlayerId) => string = playerName,
+  name: (playerId: PlayerId) => string = (playerId) => playerName(playerId, state.playerCount),
   viewerId: PlayerId = 0,
 ): string {
   if (state.phase === 'ROUND_RESULT') return '本局结束';
