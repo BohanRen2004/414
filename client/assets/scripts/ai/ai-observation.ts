@@ -1,6 +1,6 @@
 import { Card, PlayerId, Rank, TeamId } from '../core/cards/card';
+import { createDeck, DEFAULT_DECK_COUNT, DeckCount } from '../core/cards/deck';
 import { CardGroup } from '../core/patterns/play-pattern';
-import { XorShift32 } from '../core/random/prng';
 import { GamePhase, GameResult, GameState, PublicActionRecord } from '../core/state/game-state';
 import { canAddGouCha } from '../core/rules/goucha';
 
@@ -18,16 +18,53 @@ export interface AiObservation {
   readonly ownHand: readonly Card[];
   readonly publicPlayers: readonly AiPublicPlayer[];
   readonly phase: GamePhase;
+  /** The play to beat; during a gou-cha chain it stays the chain's single, the CHA/GOU cards are not a pattern. */
   readonly currentPlay: CardGroup | null;
+  /** Latest public contributor to the trick: the current play's owner, or during a chain the last CHA/GOU player. */
+  readonly holderId: PlayerId | null;
   readonly publicPlayedCardIds: readonly string[];
+  /** Game version (public): each ordinary rank has 4 copies per deck and each joker 1, so the AI can count cards. */
+  readonly deckCount: DeckCount;
+  /** Public card count: played cards (plays, CHA and GOU) per rank, indexed by `Rank`. */
+  readonly publicPlayedRankCounts: readonly number[];
   readonly publicHistory: readonly PublicActionRecord[];
   readonly result: GameResult | null;
+  /** Tie-break value hashed from this seat's public view only, so it cannot reveal the deal. */
   readonly decisionRandom: number;
   readonly legalContext: {
     readonly canPass: boolean;
     readonly gouChaNeed: 'CHA' | 'GOU' | null;
     readonly gouChaRank: Rank | null;
   };
+}
+
+/** FNV-1a with a murmur3 finalizer; any well-mixed hash works because the input is already public. */
+function hashPublicView(text: string): number {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index += 1) {
+    hash = Math.imul(hash ^ text.charCodeAt(index), 0x01000193);
+  }
+  hash = Math.imul(hash ^ (hash >>> 16), 0x85ebca6b);
+  hash = Math.imul(hash ^ (hash >>> 13), 0xc2b2ae35);
+  return (hash ^ (hash >>> 16)) >>> 0;
+}
+
+/** Canonical order, so the shuffled deal order of the hand never reaches the AI. */
+function compareCards(left: Card, right: Card): number {
+  return left.rank - right.rank || left.suit - right.suit || left.deckIndex - right.deckIndex;
+}
+
+/** Rank of every physical card ID; one deck is exactly the first deck of two, so one table serves both versions. */
+const RANK_BY_CARD_ID: ReadonlyMap<string, Rank> = new Map(createDeck(2).map((card) => [card.id, card.rank]));
+
+/** Played cards are face up, so counting them by rank reveals nothing hidden. */
+function countPlayedRanks(playedCardIds: readonly string[]): number[] {
+  const counts = new Array<number>(Rank.BIG_JOKER + 1).fill(0);
+  for (const id of playedCardIds) {
+    const rank = RANK_BY_CARD_ID.get(id);
+    if (rank !== undefined) counts[rank] = (counts[rank] ?? 0) + 1;
+  }
+  return counts;
 }
 
 /** Build a detached, information-safe view for one seat. */
@@ -45,17 +82,19 @@ export function buildObservation(state: GameState, playerId: PlayerId): AiObserv
     && player.hand.length > 0
     && player.finishPlace === null;
   const canAdd = currentPlayer && chain !== null && canAddGouCha(state, playerId);
-  let decisionRandom = 0;
-  if (state.randomState !== null) {
-    const peek = new XorShift32(state.randomState.ai);
-    decisionRandom = peek.nextUint32();
-  }
+  const publicView = state.publicHistory.map((record) => [
+    record.actionNumber,
+    record.playerId,
+    record.kind,
+    [...record.cardIds].sort(),
+  ]);
+  const decisionRandom = hashPublicView(JSON.stringify([playerId, state.actionNumber, publicView]));
 
   return {
     playerId,
     isCurrentPlayer: currentPlayer,
     teamId: player.teamId,
-    ownHand: player.hand.map((card) => ({ ...card })),
+    ownHand: [...player.hand].sort(compareCards).map((card) => ({ ...card })),
     publicPlayers: state.players.map((seat) => ({
       playerId: seat.playerId,
       teamId: seat.teamId,
@@ -63,6 +102,7 @@ export function buildObservation(state: GameState, playerId: PlayerId): AiObserv
       finishPlace: seat.finishPlace,
     })),
     phase: state.phase,
+    holderId: state.trick?.holderId ?? null,
     currentPlay: state.trick === null ? null : {
       cardIds: [...state.trick.currentPlay.cardIds],
       pattern: { ...state.trick.currentPlay.pattern },
@@ -70,6 +110,8 @@ export function buildObservation(state: GameState, playerId: PlayerId): AiObserv
       actionNumber: state.trick.currentPlay.actionNumber,
     },
     publicPlayedCardIds: [...state.playedCardIds],
+    deckCount: state.deckCount ?? DEFAULT_DECK_COUNT,
+    publicPlayedRankCounts: countPlayedRanks(state.playedCardIds),
     publicHistory: state.publicHistory.map((record) => ({ ...record, cardIds: [...record.cardIds] })),
     result: state.result === null ? null : {
       ...state.result,

@@ -94,9 +94,8 @@ describe('structure-first AI candidates', () => {
       phase: 'GOUCHA_QUERY', currentPlayer: 1,
       hands: { 0: [filler[1]!], 1: hand, 2: [fives[2]!, filler[2]!], 3: [filler[3]!] },
       gouCha: {
-        rank: Rank.FIVE, basePlay: base, additions: [], aggregateCardIds: ['base-five'],
-        aggregatePattern: { kind: 'SINGLE', rank: Rank.FIVE }, holderId: 0,
-        nextAddition: 'CHA', queryCursor: 0, declinedPlayerIds: [],
+        rank: Rank.FIVE, basePlay: base, additions: [], holderId: 0,
+        nextAddition: 'CHA', queryCursor: 1, declinedPlayerIds: [],
       },
     });
     const chaActions = generateCandidates(buildObservation(chaState, 1));
@@ -111,9 +110,7 @@ describe('structure-first AI candidates', () => {
       gouCha: {
         rank: Rank.FIVE, basePlay: base,
         additions: [{ addition: 'CHA', playerId: 1, cardIds: ['cha-five-a', 'cha-five-b'], actionNumber: 2 }],
-        aggregateCardIds: ['base-five', 'cha-five-a', 'cha-five-b'],
-        aggregatePattern: { kind: 'N_OF_KIND_BOMB', rank: Rank.FIVE, count: 3 },
-        holderId: 1, nextAddition: 'GOU', queryCursor: 1, declinedPlayerIds: [],
+        holderId: 1, nextAddition: 'GOU', queryCursor: 2, declinedPlayerIds: [],
       },
     });
     const gouActions = generateCandidates(buildObservation(gouState, 2));
@@ -126,9 +123,8 @@ describe('structure-first AI candidates', () => {
       phase: 'GOUCHA_QUERY', currentPlayer: 1,
       hands: { 0: [filler[8]!], 1: [filler[9]!], 2: [filler[10]!], 3: [filler[11]!] },
       gouCha: {
-        rank: Rank.FIVE, basePlay: base, additions: [], aggregateCardIds: ['base-five'],
-        aggregatePattern: { kind: 'SINGLE', rank: Rank.FIVE }, holderId: 0,
-        nextAddition: 'CHA', queryCursor: 0, declinedPlayerIds: [],
+        rank: Rank.FIVE, basePlay: base, additions: [], holderId: 0,
+        nextAddition: 'CHA', queryCursor: 1, declinedPlayerIds: [],
       },
     });
     const declineOnly = generateCandidates(buildObservation(noCardsState, 1));

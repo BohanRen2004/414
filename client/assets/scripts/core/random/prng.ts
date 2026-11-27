@@ -39,8 +39,10 @@ export class XorShift32 implements RandomSource {
   }
 }
 
-export type RandomStream = 'DEAL' | 'AI';
+export type RandomStream = 'DEAL';
+
+const STREAM_SALT: Readonly<Record<RandomStream, number>> = { DEAL: 0xa341316c };
 
 export function deriveSeed(rootSeed: number, stream: RandomStream): number {
-  return (rootSeed ^ (stream === 'DEAL' ? 0xa341316c : 0xc8013ea4)) >>> 0;
+  return (rootSeed ^ STREAM_SALT[stream]) >>> 0;
 }

@@ -1,11 +1,9 @@
 import { PlayerId } from '../cards/card';
-import { dealFourPlayers } from '../cards/deck';
-import { deriveSeed } from '../random/prng';
+import { DEFAULT_DECK_COUNT, PlayerCount, dealPlayers, isDeckCount, isPlayerCount } from '../cards/deck';
 import { GameAction } from '../state/game-action';
 import { GameEvent } from '../state/game-event';
 import { GameState, PlayerState } from '../state/game-state';
 import { RuleError, ruleError } from '../state/rule-error';
-import { XorShift32 } from '../random/prng';
 import { addGouCha, declineGouCha, maybeStartGouCha } from './goucha';
 import { assertGameState } from './invariants';
 import { passTurn, playCards } from './normal-trick';
@@ -16,10 +14,11 @@ export type ActionResult =
 
 const seatIds = [0, 1, 2, 3] as const satisfies readonly PlayerId[];
 
-function createPlayer(playerId: PlayerId, hand: PlayerState['hand'] = []): PlayerState {
+/** Four players: seats 0+2 and 1+3 are teams. Fewer: everyone plays alone. */
+function createPlayer(playerId: PlayerId, hand: PlayerState['hand'] = [], playerCount: PlayerCount = 4): PlayerState {
   return {
     playerId,
-    teamId: (playerId % 2) as 0 | 1,
+    teamId: playerCount === 4 ? (playerId % 2) as 0 | 1 : playerId,
     controlType: playerId === 0 ? 'HUMAN' : 'BASIC_AI',
     hand,
     finishPlace: null,
@@ -29,9 +28,12 @@ function createPlayer(playerId: PlayerId, hand: PlayerState['hand'] = []): Playe
 
 export function createSetupState(): GameState {
   return {
-    rulesVersion: '1.0.0',
+    rulesVersion: '1.3.0',
     phase: 'SETUP',
     rootSeed: null,
+    deckCount: null,
+    playerCount: 4,
+    buriedCardIds: [],
     randomState: null,
     firstPlayer: null,
     players: [createPlayer(0), createPlayer(1), createPlayer(2), createPlayer(3)],
@@ -45,19 +47,29 @@ export function createSetupState(): GameState {
   };
 }
 
-function startGame(state: GameState, seed: number): ActionResult {
+function startGame(state: GameState, action: Extract<GameAction, { kind: 'START_GAME' }>): ActionResult {
   if (state.phase !== 'SETUP') return { ok: false, error: ruleError('WRONG_PHASE') };
+  const { seed } = action;
+  const playerCount = action.playerCount ?? 4;
+  if (!isPlayerCount(playerCount)) {
+    return { ok: false, error: ruleError('INVALID_PLAYER_COUNT', { playerCount: String(playerCount) }) };
+  }
+  // Fewer than four players always play with one deck.
+  const deckCount = action.deckCount ?? (playerCount === 4 ? DEFAULT_DECK_COUNT : 1);
+  if (!isDeckCount(deckCount) || (playerCount !== 4 && deckCount !== 1)) {
+    return { ok: false, error: ruleError('INVALID_DECK_COUNT', { deckCount: String(deckCount) }) };
+  }
 
-  const deal = dealFourPlayers(seed);
-  const players = seatIds.map((playerId) => createPlayer(playerId, deal.hands[playerId])) as unknown as GameState['players'];
+  const deal = dealPlayers(seed, deckCount, playerCount);
+  const players = seatIds.map((playerId) => createPlayer(playerId, deal.hands[playerId], playerCount)) as unknown as GameState['players'];
   const started: GameState = {
     ...state,
     phase: 'FREE_LEAD',
     rootSeed: seed,
-    randomState: {
-      deal: deal.dealStateAfterSetup,
-      ai: deriveSeed(seed, 'AI'),
-    },
+    deckCount,
+    playerCount,
+    buriedCardIds: deal.buried.map((card) => card.id),
+    randomState: { deal: deal.dealStateAfterSetup },
     firstPlayer: deal.firstPlayer,
     players,
     currentPlayer: deal.firstPlayer,
@@ -81,7 +93,7 @@ function startGame(state: GameState, seed: number): ActionResult {
 }
 
 function applyActionUnchecked(state: GameState, action: GameAction): ActionResult {
-  if (action.kind === 'START_GAME') return startGame(state, action.seed);
+  if (action.kind === 'START_GAME') return startGame(state, action);
   if (state.phase === 'ROUND_RESULT') return { ok: false, error: ruleError('GAME_ALREADY_FINISHED') };
   if (state.phase === 'GOUCHA_QUERY') {
     if (action.kind === 'ADD_GOUCHA') return addGouCha(state, action);
@@ -132,20 +144,7 @@ function shouldAssertSuccessfulTransitions(): boolean {
 }
 
 export function applyAction(state: GameState, action: GameAction): ActionResult {
-  let result = applyActionUnchecked(state, action);
-  const playerId = action.kind === 'START_GAME' ? null : action.playerId;
-  if (result.ok && playerId !== null && state.randomState !== null
-    && state.players[playerId].controlType === 'BASIC_AI' && result.state.randomState !== null) {
-    const aiRandom = new XorShift32(state.randomState.ai);
-    aiRandom.nextUint32();
-    result = {
-      ...result,
-      state: {
-        ...result.state,
-        randomState: { ...result.state.randomState, ai: aiRandom.snapshot() },
-      },
-    };
-  }
+  const result = applyActionUnchecked(state, action);
   if (result.ok && shouldAssertSuccessfulTransitions()) assertGameState(result.state);
   return result;
 }

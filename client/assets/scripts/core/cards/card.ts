@@ -32,4 +32,5 @@ export interface Card {
 }
 
 export type PlayerId = 0 | 1 | 2 | 3;
-export type TeamId = 0 | 1;
+/** Four players play two teams (seats 0+2 and 1+3); two or three players each play alone, a team of one. */
+export type TeamId = 0 | 1 | 2 | 3;

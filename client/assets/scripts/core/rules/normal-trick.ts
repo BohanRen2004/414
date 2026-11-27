@@ -21,7 +21,7 @@ export function nextActivePlayer(players: readonly PlayerState[], after: PlayerI
 
 export function recordFinish(state: GameState, playerId: PlayerId): GameState {
   if (state.finishOrder.includes(playerId)) return state;
-  if (state.finishOrder.length >= 4) return state;
+  if (state.finishOrder.length >= state.playerCount) return state;
   const place = (state.finishOrder.length + 1) as 1 | 2 | 3 | 4;
   const [seat0, seat1, seat2, seat3] = state.players;
   const players: GameState['players'] = [
@@ -46,6 +46,17 @@ function appendAction(
     ],
     actionNumber: state.actionNumber + 1,
   };
+}
+
+/**
+ * The trick winner leads again; a finished winner hands the lead to their partner (借光), else, and always
+ * with no partner (two or three players), to the next player clockwise.
+ */
+export function nextLeadPlayer(players: readonly PlayerState[], holderId: PlayerId): PlayerId | null {
+  if (active(players[holderId]!)) return holderId;
+  const partnerId = ((holderId + 2) % 4) as PlayerId;
+  if (players[partnerId]!.teamId === players[holderId]!.teamId && active(players[partnerId]!)) return partnerId;
+  return nextActivePlayer(players, holderId);
 }
 
 function findNextResponder(
@@ -73,18 +84,26 @@ export function finishEvents(state: GameState, playerId: PlayerId, remaining: nu
   return events;
 }
 
-export function completeIfOneActive(state: GameState, events: GameEvent[]): GameState {
+/**
+ * The round ends once everyone still holding cards is on one team: one player left, or both of a team's
+ * opponents out. Nothing left to play can change who won or how many were caught, so the teammates do not
+ * play on against each other. They take the last places, fewer cards first, then by seat.
+ */
+export function completeIfDecided(state: GameState, events: GameEvent[]): GameState {
   const remaining = state.players.filter(active);
-  if (remaining.length !== 1) return state;
+  if (remaining.length === 0 || new Set(remaining.map((player) => player.teamId)).size !== 1) return state;
 
-  const lastPlayer = remaining[0]!;
-  const finished = recordFinish(state, lastPlayer.playerId);
-  events.push({
-    kind: 'PLAYER_FINISHED',
-    playerId: lastPlayer.playerId,
-    place: (finished.finishOrder.length) as 1 | 2 | 3 | 4,
-  });
-  const result = buildResult(finished.finishOrder);
+  let finished = state;
+  const ordered = [...remaining].sort((left, right) => left.hand.length - right.hand.length || left.playerId - right.playerId);
+  for (const player of ordered) {
+    finished = recordFinish(finished, player.playerId);
+    events.push({
+      kind: 'PLAYER_FINISHED',
+      playerId: player.playerId,
+      place: (finished.finishOrder.length) as 1 | 2 | 3 | 4,
+    });
+  }
+  const result = buildResult(finished.finishOrder, state.playerCount);
   events.push({ kind: 'ROUND_FINISHED' });
   return { ...finished, phase: 'ROUND_RESULT', currentPlayer: null, result };
 }
@@ -152,13 +171,14 @@ export function playCards(state: GameState, action: Extract<GameAction, { kind: 
       nextResponder: null,
       passedPlayerIds: [],
       gouCha: null,
+      leadActionNumber: previousTrick?.leadActionNumber ?? state.actionNumber,
     },
   };
 
   const events: GameEvent[] = [{ kind: 'CARDS_PLAYED', playerId: action.playerId, cardIds: [...action.cardIds] }];
   events.push(...finishEvents(state, action.playerId, remainingHand.length));
   if (remainingHand.length === 0) next = recordFinish(next, action.playerId);
-  next = completeIfOneActive(next, events);
+  next = completeIfDecided(next, events);
 
   if (next.phase !== 'ROUND_RESULT') {
     const responder = nextActivePlayer(next.players, action.playerId);
@@ -194,7 +214,7 @@ export function passTurn(state: GameState, action: Extract<GameAction, { kind: '
   );
 
   if (allRespondersPassed) {
-    const leadPlayer = nextActivePlayer(state.players, state.trick.holderId);
+    const leadPlayer = nextLeadPlayer(state.players, state.trick.holderId);
     if (leadPlayer === null) {
       return { ok: false, error: { code: 'GAME_ALREADY_FINISHED', messageKey: 'rule.game_already_finished', context: {} } };
     }

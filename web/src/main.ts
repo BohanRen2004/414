@@ -1,26 +1,44 @@
-import { Card, Rank, Suit } from '../../client/assets/scripts/core/cards/card';
-import { createDoubleDeck } from '../../client/assets/scripts/core/cards/deck';
-import { GameState } from '../../client/assets/scripts/core/state/game-state';
+import { Card, Rank } from '../../client/assets/scripts/core/cards/card';
+import { createDoubleDeck, DEFAULT_DECK_COUNT, DeckCount, PlayerCount } from '../../client/assets/scripts/core/cards/deck';
+import { recognize } from '../../client/assets/scripts/core/patterns/recognize';
+import { DECK_OPTIONS, PLAYER_OPTIONS, deckOption, playerOption } from '../../client/assets/scripts/ui/deck-options';
+import { dragSelection } from '../../client/assets/scripts/ui/hand-selection';
+import {
+  SUIT_GLYPH, errorMessage, formatSeed, isRedCard, phaseMessage, playerName, rankLabel, sortCardsForDisplay,
+} from '../../client/assets/scripts/ui/labels';
+import { SeatActionViewModel } from '../../client/assets/scripts/ui/table-view-model';
 import { BrowserGameSession, BrowserSessionSnapshot } from './browser-session';
+import { isMuted, playSound, setMuted, unlockAudio } from './sound';
 import './style.css';
+
+type Position = 'top' | 'left' | 'right' | 'bottom';
 
 const root = document.querySelector<HTMLDivElement>('#app');
 if (root === null) throw new Error('Missing #app root');
 
+// One deck uses the same card IDs as the first of two decks, so this map serves both versions.
 const allCards = new Map(createDoubleDeck().map((card) => [card.id, card]));
-const suitGlyph: Record<Suit, string> = {
-  [Suit.CLUB]: '♣',
-  [Suit.DIAMOND]: '♦',
-  [Suit.HEART]: '♥',
-  [Suit.SPADE]: '♠',
-  [Suit.JOKER]: '✦',
-};
+
+/** Pause after each shown move, long enough to follow the AIs' plays. */
+const MOVE_DELAY_MS = 520;
+/** How long a new play takes to land in front of its seat, and how long the bomb banner stays. */
+const LAND_MS = 380;
+const FLASH_MS = 1100;
 
 let helpOpen = false;
+let counterOpen = false;
 let notice = '';
 let noticeTimer: number | undefined;
-let session = new BrowserGameSession(readSeedFromUrl() ?? 414);
-let unsubscribe = session.subscribe(render);
+/** Version picked on the start screen; "同种子重开" and "新开一局" keep it. */
+let chosenDeckCount: DeckCount = readDeckCountFromUrl() ?? DEFAULT_DECK_COUNT;
+/** Table size picked on the start screen (you included). */
+let chosenPlayerCount: PlayerCount = readPlayerCountFromUrl() ?? 4;
+let session = newSession(readSeedFromUrl() ?? 414, chosenDeckCount, chosenPlayerCount);
+/** When each seat's shown action first appeared, so re-renders continue its landing animation instead of restarting it. */
+const landed = new Map<Position, { key: number; at: number }>();
+let flash: { text: string; at: number } | null = null;
+let flashTimer: number | undefined;
+let unsubscribe = session.subscribe(onSnapshot);
 
 function escapeHtml(value: string | number): string {
   return String(value).replace(/[&<>"']/g, (character) => ({
@@ -39,263 +57,415 @@ function readSeedFromUrl(): number | null {
   return Number.isSafeInteger(seed) && seed >= 0 && seed <= 0xffff_ffff ? seed : null;
 }
 
-function formatSeed(seed: number): string {
-  return `#${seed.toString().padStart(10, '0')}`;
+function readPlayerCountFromUrl(): PlayerCount | null {
+  const value = new URLSearchParams(window.location.search).get('players');
+  return value === '2' ? 2 : value === '3' ? 3 : value === '4' ? 4 : null;
 }
 
-function rankLabel(rank: Rank): string {
-  switch (rank) {
-    case Rank.THREE: return '3';
-    case Rank.FOUR: return '4';
-    case Rank.FIVE: return '5';
-    case Rank.SIX: return '6';
-    case Rank.SEVEN: return '7';
-    case Rank.EIGHT: return '8';
-    case Rank.NINE: return '9';
-    case Rank.TEN: return '10';
-    case Rank.JACK: return 'J';
-    case Rank.QUEEN: return 'Q';
-    case Rank.KING: return 'K';
-    case Rank.ACE: return 'A';
-    case Rank.TWO: return '2';
-    case Rank.SMALL_JOKER: return '小王';
-    case Rank.BIG_JOKER: return '大王';
-  }
+function readDeckCountFromUrl(): DeckCount | null {
+  const value = new URLSearchParams(window.location.search).get('decks');
+  return value === '1' ? 1 : value === '2' ? 2 : null;
 }
 
-function sortHand(cards: readonly Card[]): Card[] {
-  return [...cards].sort((left, right) => left.rank - right.rank || left.suit - right.suit || left.deckIndex - right.deckIndex);
+/** The started game's version, or the one chosen for the next start. */
+function shownDeckCount(snapshot: BrowserSessionSnapshot): DeckCount {
+  return snapshot.state.deckCount ?? chosenDeckCount;
 }
 
-function playerName(playerId: number): string {
-  if (playerId === 0) return '你';
-  if (playerId === 2) return '搭档';
-  return playerId === 1 ? '左对家' : '右对家';
+// --- Screen size -------------------------------------------------------------------------------------------
+
+function touchLayout(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 }
 
-function phaseMessage(state: GameState): string {
-  if (state.phase === 'ROUND_RESULT') return '本局结束';
-  if (state.phase === 'GOUCHA_QUERY' && state.currentPlayer === 0) {
-    const addition = state.trick?.gouCha?.nextAddition;
-    return addition === 'CHA' ? '轮到你岔：选同点数的一对牌' : '轮到你勾：选同点数的一张牌';
-  }
-  if (state.currentPlayer === 0 && state.phase === 'FREE_LEAD') return '轮到你自由出牌';
-  if (state.currentPlayer === 0 && state.phase === 'RESPONDING') return '轮到你压牌，或选择不出';
-  return state.currentPlayer === null ? '正在准备牌局' : `${playerName(state.currentPlayer)}思考中`;
-}
+interface ScreenBox { readonly x: number; readonly y: number; readonly w: number; readonly h: number }
 
-function humanError(snapshot: BrowserSessionSnapshot): string {
-  const code = snapshot.viewModel.controls.errorKey ?? snapshot.errorCode;
-  if (code === null) return '';
-  const messages: Record<string, string> = {
-    'selection.empty': '先选择要出的牌。',
-    'pattern.mixed_ranks': '对子需要两张同点数牌。',
-    'pattern.sequence_too_short': '顺子至少需要连续三张。',
-    'pattern.sequence_gap': '顺子点数必须连续。',
-    'pattern.sequence_forbidden_rank': '2 和大小王不能加入顺子。',
-    'pattern.sequence_multiplicity': '顺子每个点数的张数必须一致。',
-    'pattern.unsupported_combination': '这组牌不符合已确认的牌型。',
-    'rule.not_current_player': '现在还没有轮到你。',
-    'rule.wrong_phase': '当前阶段不能执行这个动作。',
-    'rule.does_not_beat_current_play': '这组牌压不过桌面牌。',
-    'rule.card_not_owned': '选择的牌已不在你的手牌中。',
-    'INVALID_GOUCHA_SELECTION': '请选择符合岔/勾要求的牌。',
+/**
+ * The part of the window that is on screen. Some hosts give the page a frame taller than the screen (the
+ * Claude app's artifact view, some in-app browsers), so innerWidth/innerHeight overstate what the player
+ * sees and the table would run off the edge. An IntersectionObserver on a probe covering the window reports
+ * the part actually on screen, even from inside a cross-origin frame.
+ */
+let onScreen: ScreenBox | null = null;
+
+function screenBox(): ScreenBox {
+  const whole = { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight };
+  const seen = onScreen;
+  // A frame not shown yet (or scrolled almost away) leaves nothing sensible to fit to.
+  if (seen === null || seen.w < 200 || seen.h < 150) return whole;
+  return {
+    x: Math.max(0, seen.x),
+    y: Math.max(0, seen.y),
+    w: Math.min(seen.w, whole.w),
+    h: Math.min(seen.h, whole.h),
   };
-  return messages[code] ?? `操作未生效（${code}）`;
 }
 
-function renderCard(card: Card, selected: boolean, compact = false): string {
-  const red = card.suit === Suit.HEART || card.suit === Suit.DIAMOND || card.rank === Rank.BIG_JOKER;
+function watchScreenBox(onChange: () => void): void {
+  if (typeof IntersectionObserver !== 'function') return;
+  const probe = document.createElement('div');
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.cssText = 'position:fixed;inset:0;pointer-events:none;opacity:0;z-index:-1';
+  document.body.append(probe);
+  const thresholds = Array.from({ length: 101 }, (_, index) => index / 100);
+  new IntersectionObserver((entries) => {
+    const rect = entries[entries.length - 1]!.intersectionRect;
+    const next = { x: Math.round(rect.x), y: Math.round(rect.y), w: Math.round(rect.width), h: Math.round(rect.height) };
+    const last = onScreen;
+    if (last !== null && last.x === next.x && last.y === next.y && last.w === next.w && last.h === next.h) return;
+    onScreen = next;
+    onChange();
+  }, { threshold: thresholds }).observe(probe);
+}
+
+function isPhone(box: ScreenBox): boolean {
+  return touchLayout() && Math.min(box.w, box.h) <= 540;
+}
+
+/**
+ * The game is one landscape screen. Its size goes to --app-w/--app-h and its place to --app-x/--app-y; a
+ * phone held upright gets the whole game turned a quarter (html.rotated), with the notch side kept clear
+ * through --safe-left/--safe-right.
+ */
+function applyLayout(): void {
+  // A keyboard opening for the seed field shrinks the window; keep the layout until it closes.
+  if (document.activeElement instanceof HTMLInputElement && document.documentElement.classList.contains('phone')) return;
+  const html = document.documentElement;
+  const box = screenBox();
+  const phone = isPhone(box);
+  const rotated = phone && box.h > box.w;
+  html.classList.toggle('phone', phone);
+  html.classList.toggle('rotated', rotated);
+  // A short table (phones in landscape) puts the partner's play beside the partner instead of below.
+  html.classList.toggle('short', (rotated ? box.w : box.h) <= 480);
+  html.style.setProperty('--app-x', `${box.x}px`);
+  html.style.setProperty('--app-y', `${box.y}px`);
+  html.style.setProperty('--app-w', `${rotated ? box.h : box.w}px`);
+  html.style.setProperty('--app-h', `${rotated ? box.w : box.h}px`);
+  html.style.setProperty('--safe-left', rotated ? 'env(safe-area-inset-top, 0px)' : 'env(safe-area-inset-left, 0px)');
+  html.style.setProperty('--safe-right', rotated ? 'env(safe-area-inset-bottom, 0px)' : 'env(safe-area-inset-right, 0px)');
+}
+applyLayout();
+function relayout(): void {
+  applyLayout();
+  render(session.snapshot());
+}
+window.addEventListener('resize', relayout);
+watchScreenBox(relayout);
+
+// --- Pieces ------------------------------------------------------------------------------------------------
+
+function renderCard(card: Card, options: { size?: 'hand' | 'mini'; copy?: boolean } = {}): string {
+  const joker = card.rank === Rank.SMALL_JOKER || card.rank === Rank.BIG_JOKER;
+  const classes = ['card', options.size === 'mini' ? 'is-mini' : '', isRedCard(card) ? 'is-red' : '', joker ? 'is-joker' : ''].filter(Boolean).join(' ');
   const rank = rankLabel(card.rank);
-  const glyph = suitGlyph[card.suit];
-  const classes = ['playing-card', red ? 'is-red' : '', selected ? 'is-selected' : '', compact ? 'is-compact' : '']
-    .filter(Boolean).join(' ');
-  return `<span class="${classes}" aria-label="${escapeHtml(rank)}${glyph}">
-    <span class="card-corner"><strong>${escapeHtml(rank)}</strong><i>${glyph}</i></span>
-    <span class="card-center-suit">${glyph}</span>
-    <span class="card-copy">${card.deckIndex === 0 ? 'I' : 'II'}</span>
-  </span>`;
+  const glyph = SUIT_GLYPH[card.suit];
+  const corner = joker
+    ? `<b class="card-rank joker-rank">${card.rank === Rank.BIG_JOKER ? '大' : '小'}</b><b class="card-rank joker-rank">王</b>`
+    : `<b class="card-rank">${escapeHtml(rank)}</b><i class="card-suit">${glyph}</i>`;
+  const copy = options.copy ? `<small class="card-copy">${card.deckIndex === 0 ? 'Ⅰ' : 'Ⅱ'}</small>` : '';
+  return `<span class="${classes}" aria-label="${escapeHtml(joker ? (card.rank === Rank.BIG_JOKER ? '大王' : '小王') : rank + glyph)}">
+    <span class="card-corner">${corner}</span><span class="card-pip">${joker ? '★' : glyph}</span>${copy}</span>`;
+}
+
+/** The letter in each seat's avatar, by table size. */
+function seatLetter(playerId: number, playerCount: number): string {
+  if (playerId === 0) return '你';
+  if (playerCount === 2) return '对';
+  if (playerCount === 3) return playerId === 1 ? '左' : '右';
+  return ['你', '左', '搭', '右'][playerId]!;
+}
+
+function seatName(snapshot: BrowserSessionSnapshot, playerId: number): string {
+  return playerName(playerId, snapshot.state.playerCount);
+}
+
+function renderSeat(position: Position, snapshot: BrowserSessionSnapshot): string {
+  const seat = snapshot.viewModel.seats[position];
+  if (seat === null) return '';
+  const active = snapshot.state.currentPlayer === seat.playerId && snapshot.state.phase !== 'ROUND_RESULT';
+  const out = seat.finishPlace !== null;
+  const badges = [
+    seat.reportCount !== null && !out ? `<span class="seat-alert">报${seat.reportCount}</span>` : '',
+    out ? `<span class="seat-place">第 ${seat.finishPlace} 名</span>` : '',
+  ].join('');
+  return `<section class="seat seat-${position} team-${seat.teamId} ${active ? 'is-active' : ''} ${out ? 'is-out' : ''}"
+      aria-label="${escapeHtml(seatName(snapshot, seat.playerId))}，剩 ${seat.remaining} 张">
+    <div class="avatar">${seatLetter(seat.playerId, snapshot.state.playerCount)}${active ? '<span class="thinking" aria-hidden="true"><i></i><i></i><i></i></span>' : ''}</div>
+    <div class="seat-info">
+      <strong>${escapeHtml(seatName(snapshot, seat.playerId))}</strong>
+      <span class="seat-count"><span class="card-back" aria-hidden="true"></span>${seat.remaining}</span>
+      ${badges}
+    </div>
+  </section>`;
+}
+
+/** Animation style for an action that has just appeared; a re-render continues it rather than replaying it. */
+function landingStyle(position: Position, action: SeatActionViewModel): string {
+  const now = performance.now();
+  const seen = landed.get(position);
+  if (seen === undefined || seen.key !== action.key) {
+    landed.set(position, { key: action.key, at: now });
+    return 'animation-delay: 0ms';
+  }
+  const elapsed = now - seen.at;
+  return elapsed >= LAND_MS ? 'animation: none' : `animation-delay: -${Math.round(elapsed)}ms`;
+}
+
+function renderZone(position: Position, snapshot: BrowserSessionSnapshot): string {
+  const action = snapshot.viewModel.seatActions[position];
+  if (action === null) {
+    landed.delete(position);
+    return `<div class="zone zone-${position}"></div>`;
+  }
+  const style = landingStyle(position, action);
+  if (action.kind === 'PASS') {
+    return `<div class="zone zone-${position}"><span class="bubble is-pass" style="${style}">不出</span></div>`;
+  }
+  const copy = shownDeckCount(snapshot) === 2;
+  const cards = action.cardIds.flatMap((id) => {
+    const card = allCards.get(id);
+    return card === undefined ? [] : [renderCard(card, { size: 'mini', copy })];
+  }).join('');
+  const label = action.kind === 'PLAY'
+    ? `<span class="play-label ${action.bomb ? 'is-bomb' : ''}">${escapeHtml(action.label)}${action.leading ? '<em>最大</em>' : ''}</span>`
+    : `<span class="bubble is-goucha">${escapeHtml(action.label)}！</span>`;
+  return `<div class="zone zone-${position}">
+    <div class="played ${action.leading ? 'is-leading' : ''} ${action.bomb ? 'is-bomb' : ''}" style="${style}">
+      <div class="played-cards">${cards}</div>${label}
+    </div>
+  </div>`;
+}
+
+function renderCounter(snapshot: BrowserSessionSnapshot): string {
+  if (!counterOpen) return '';
+  const entries = snapshot.viewModel.cardCounter;
+  if (entries.length === 0) return '';
+  return `<section class="counter" aria-label="记牌器：其他三家手里还剩的牌">
+    <div class="counter-title">记牌器<small>${snapshot.state.playerCount === 2 ? '对手或扣牌' : snapshot.state.playerCount === 3 ? '两家还剩' : '三家还剩'}</small></div>
+    <ol>${entries.map((entry) => `<li class="${entry.unseen === 0 ? 'is-gone' : ''}"><b>${escapeHtml(entry.label)}</b><span>${entry.unseen}</span></li>`).join('')}</ol>
+  </section>`;
+}
+
+function renderBar(snapshot: BrowserSessionSnapshot): string {
+  const started = snapshot.state.phase !== 'SETUP';
+  const seed = snapshot.state.rootSeed ?? session.seed;
+  const option = deckOption(shownDeckCount(snapshot));
+  return `<header class="bar">
+    <div class="bar-title"><span class="logo">4<i>A</i>4</span><span class="bar-meta">${snapshot.state.playerCount} 人 · ${escapeHtml(option.label)} · 种子 ${escapeHtml(formatSeed(seed))}</span></div>
+    <nav class="bar-actions" aria-label="游戏工具">
+      <button class="chip ${counterOpen ? 'is-on' : ''}" data-action="counter" ${started ? '' : 'disabled'} aria-pressed="${counterOpen}">记牌器</button>
+      <button class="chip" data-action="sound" aria-pressed="${!isMuted()}">${isMuted() ? '音效 关' : '音效 开'}</button>
+      <button class="chip" data-action="help">规则</button>
+      <button class="chip" data-action="new-game" ${snapshot.isBusy ? 'disabled' : ''}>新开一局</button>
+    </nav>
+  </header>`;
+}
+
+function renderDock(snapshot: BrowserSessionSnapshot): string {
+  const { viewModel, state } = snapshot;
+  const picked = snapshot.selectedCardIds;
+  const prompt = viewModel.gouCha;
+  const busy = snapshot.isBusy;
+  const error = errorMessage(viewModel.controls.errorKey ?? snapshot.errorCode);
+  const status = phaseMessage(state, viewModel, busy);
+  let buttons = '';
+  if (prompt !== null) {
+    const eligible = new Set(prompt.eligibleCardIds);
+    const valid = picked.length === prompt.requiredCount && picked.every((id) => eligible.has(id));
+    const verb = prompt.addition === 'CHA' ? '岔' : '勾';
+    buttons = `<button class="btn btn-pass" data-action="decline-goucha" ${busy ? 'disabled' : ''}>放弃</button>
+      <button class="btn btn-play" data-action="confirm-goucha" ${!valid || busy ? 'disabled' : ''}>${verb}！</button>`;
+  } else if (viewModel.controls.showPlay) {
+    buttons = `${viewModel.controls.showPass ? `<button class="btn btn-pass" data-action="pass" title="快捷键 P" ${busy ? 'disabled' : ''}>不出</button>` : ''}
+      <button class="btn btn-hint" data-action="hint" title="快捷键 H" ${busy ? 'disabled' : ''}>提示</button>
+      <button class="btn btn-play" data-action="play" title="快捷键 回车" ${!viewModel.controls.playEnabled || busy ? 'disabled' : ''}>出牌</button>`;
+  }
+  const caption = prompt !== null
+    ? `${prompt.addition === 'CHA' ? '岔' : '勾'} ${rankLabel(prompt.rank)}：${prompt.addition === 'CHA' ? '选两张同点数的牌' : '选一张同点数的牌'}`
+    : picked.length > 0 ? `已选 ${picked.length} 张` : '';
+  return `<div class="dock-bar">
+    <div class="dock-status ${state.currentPlayer === 0 && !busy ? 'is-yours' : ''}" role="status" aria-live="polite">${escapeHtml(status)}</div>
+    <div class="dock-buttons">${buttons}</div>
+    <div class="dock-side">
+      ${caption ? `<span class="dock-caption">${escapeHtml(caption)}</span>` : ''}
+      ${picked.length > 0 && !busy ? '<button class="link" data-action="clear">清除</button>' : ''}
+      ${error ? `<span class="dock-error">${escapeHtml(error)}</span>` : ''}
+    </div>
+  </div>`;
+}
+
+/** Two decks deal 27 cards: they sit in columns by rank, the way 掼蛋 games show a big hand. One deck is one row. */
+function usesColumns(snapshot: BrowserSessionSnapshot): boolean {
+  return shownDeckCount(snapshot) === 2;
 }
 
 function renderHand(snapshot: BrowserSessionSnapshot): string {
   const hand = snapshot.viewModel.seats.bottom.cards ?? [];
-  if (hand.length === 0) return '<p class="empty-hand">开局后，你的 27 张手牌会在这里显示。</p>';
+  if (hand.length === 0) {
+    return snapshot.state.phase === 'SETUP' ? '' : '<p class="hand-empty">你的牌已经出完</p>';
+  }
+  const copy = shownDeckCount(snapshot) === 2;
   const selected = new Set(snapshot.selectedCardIds);
   const prompt = snapshot.viewModel.gouCha;
   const eligible = prompt === null ? null : new Set(prompt.eligibleCardIds);
-  return `<div class="hand-track" aria-label="你的手牌">${sortHand(hand).map((card) => {
-    const active = selected.has(card.id);
-    const ineligible = eligible !== null && !eligible.has(card.id);
-    const cardHtml = renderCard(card, active);
-    return `<button class="hand-card ${active ? 'is-picked' : ''} ${ineligible ? 'is-ineligible' : ''}"
-      type="button" data-action="toggle-card" data-card-id="${escapeHtml(card.id)}"
-      aria-label="选择 ${escapeHtml(rankLabel(card.rank))}${suitGlyph[card.suit]}"
-      aria-pressed="${active}" ${snapshot.isBusy ? 'disabled' : ''}>${cardHtml}</button>`;
-  }).join('')}</div>`;
+  const button = (card: Card): string => {
+    const picked = selected.has(card.id);
+    const dimmed = eligible !== null && !eligible.has(card.id);
+    return `<button class="hand-card ${picked ? 'is-picked' : ''} ${dimmed ? 'is-dimmed' : ''}" type="button"
+      data-action="toggle-card" data-card-id="${escapeHtml(card.id)}" aria-pressed="${picked}"
+      ${snapshot.isBusy || dimmed ? 'disabled' : ''}>${renderCard(card, { copy })}</button>`;
+  };
+  const sorted = sortCardsForDisplay(hand);
+  if (!usesColumns(snapshot)) return `<div class="hand is-row">${sorted.map(button).join('')}</div>`;
+  const columns: Card[][] = [];
+  for (const card of sorted) {
+    const last = columns[columns.length - 1];
+    if (last !== undefined && last[0]!.rank === card.rank) last.push(card);
+    else columns.push([card]);
+  }
+  const tallest = Math.max(...columns.map((column) => column.length));
+  return `<div class="hand is-columns" style="--tallest: ${tallest}">${columns
+    .map((column) => `<div class="hand-column">${column.map(button).join('')}</div>`).join('')}</div>`;
 }
 
-function renderSeat(position: 'top' | 'left' | 'right' | 'bottom', snapshot: BrowserSessionSnapshot): string {
-  const seat = snapshot.viewModel.seats[position];
-  const state = snapshot.state.players[seat.playerId];
-  const active = snapshot.state.currentPlayer === seat.playerId;
-  const human = seat.playerId === 0;
-  const isPartner = seat.playerId === 2;
-  const classes = ['player-seat', `seat-${position}`, active ? 'is-active' : '', human ? 'is-human' : '', isPartner ? 'is-partner' : '']
-    .filter(Boolean).join(' ');
-  const handbacks = human ? '' : `<span class="hidden-hand" aria-label="${seat.remaining} 张隐藏手牌">
-    <i></i><i></i><i></i>
-  </span>`;
-  const report = seat.reportCount === null ? '' : `<span class="report-pill">报 ${seat.reportCount}</span>`;
-  const place = seat.finishPlace === null ? '' : `<span class="place-pill">第 ${seat.finishPlace}</span>`;
-  return `<section class="${classes}" aria-label="${playerName(seat.playerId)}，剩余 ${seat.remaining} 张">
-    <div class="seat-avatar">${human ? 'YOU' : isPartner ? 'P' : 'AI'}</div>
-    <div class="seat-copy">
-      <div class="seat-heading"><strong>${playerName(seat.playerId)}</strong><span class="team-tag team-${seat.teamId}">${seat.teamId === 0 ? '蓝队' : '金队'}</span></div>
-      <div class="seat-meta"><span>${seat.remaining} 张</span>${report}${place}</div>
+function renderFlash(): string {
+  if (flash === null) return '';
+  const elapsed = performance.now() - flash.at;
+  if (elapsed >= FLASH_MS) return '';
+  return `<div class="flash" aria-hidden="true" style="animation-delay: -${Math.round(elapsed)}ms"><span>${escapeHtml(flash.text)}</span></div>`;
+}
+
+function renderDeckChoice(): string {
+  const players = PLAYER_OPTIONS.map((option) => `<label class="deck-option">
+      <input type="radio" name="players" value="${option.playerCount}" ${option.playerCount === chosenPlayerCount ? 'checked' : ''} />
+      <span class="deck-option-body"><b>${escapeHtml(option.label)}</b><small>${escapeHtml(option.summary)}</small></span>
+    </label>`).join('');
+  // Only a four-player table offers two decks.
+  const decks = DECK_OPTIONS.map((option) => `<label class="deck-option">
+      <input type="radio" name="deck" value="${option.deckCount}" ${option.deckCount === chosenDeckCount ? 'checked' : ''} />
+      <span class="deck-option-body"><b>${escapeHtml(option.label)}</b><small>${escapeHtml(option.summary)}</small></span>
+    </label>`).join('');
+  return `<div class="deck-options player-options" role="radiogroup" aria-label="人数">${players}</div>
+    <div class="deck-options" role="radiogroup" aria-label="牌数" ${chosenPlayerCount === 4 ? '' : 'hidden'}>${decks}</div>`;
+}
+
+function renderStart(snapshot: BrowserSessionSnapshot): string {
+  if (snapshot.state.phase !== 'SETUP') return '';
+  return `<div class="modal"><section class="panel start-panel" role="dialog" aria-modal="true" aria-labelledby="start-title">
+    <div class="start-hero">
+      <div class="logo logo-big">4<i>A</i>4</div>
+      <h1 id="start-title">和 AI 打一局</h1>
+      <p>四人是两队：你和对面的搭档一队，抓的人越多赢得越漂亮。两三人时各打各的，谁先出完谁赢。</p>
     </div>
-    ${handbacks}
-    ${active ? '<span class="turn-pulse" aria-label="当前回合"></span>' : ''}
-    <span class="sr-only">${state.controlType === 'HUMAN' ? '真人' : '基础 AI'}</span>
-  </section>`;
-}
-
-function renderCenter(snapshot: BrowserSessionSnapshot): string {
-  const trick = snapshot.state.trick;
-  const currentCards = trick?.currentPlay.cardIds.flatMap((id) => {
-    const card = allCards.get(id);
-    return card === undefined ? [] : [renderCard(card, false, true)];
-  }) ?? [];
-  const holder = snapshot.viewModel.center.holderId;
-  const history = snapshot.state.publicHistory.slice(-4).reverse().map((entry) => {
-    const action = entry.kind === 'PLAY_CARDS' ? '出牌' : entry.kind === 'PASS' ? '不出' : entry.kind;
-    return `<li><span>${playerName(entry.playerId)}</span><b>${action}</b><i>#${entry.actionNumber}</i></li>`;
-  }).join('');
-  const content = currentCards.length > 0
-    ? `<div class="table-cards">${currentCards.join('')}</div>`
-    : '<div class="table-emblem"><span>4</span><i>A</i><span>4</span></div>';
-  const contributions = snapshot.viewModel.center.contributions.map((part) => `${playerName(part.playerId)}${part.label}`).join(' · ');
-  return `<section class="center-table" aria-label="牌桌中央">
-    <div class="table-orbit orbit-one"></div><div class="table-orbit orbit-two"></div>
-    <div class="table-topline"><span class="eyebrow">CURRENT TRICK</span><span class="trick-index">${trick === null ? '—' : `#${trick.currentPlay.actionNumber}`}</span></div>
-    <div class="pattern-label">${escapeHtml(snapshot.viewModel.center.patternLabel)}</div>
-    ${content}
-    <p class="holder-line">${holder === null ? '等待首手出牌' : `当前持有：${playerName(holder)}`}</p>
-    ${contributions ? `<p class="contribution-line">${escapeHtml(contributions)}</p>` : ''}
-    <div class="turn-banner ${snapshot.state.currentPlayer === 0 ? 'for-human' : ''}" role="status" aria-live="polite">
-      <span class="status-dot"></span>${escapeHtml(phaseMessage(snapshot.state))}
-    </div>
-    <ol class="action-history" aria-label="最近动作">${history || '<li class="history-empty">等待第一手</li>'}</ol>
-  </section>`;
-}
-
-function renderControls(snapshot: BrowserSessionSnapshot): string {
-  const controls = snapshot.viewModel.controls;
-  const prompt = snapshot.viewModel.gouCha;
-  const picked = snapshot.selectedCardIds;
-  const eligible = new Set(prompt?.eligibleCardIds ?? []);
-  const validGouCha = prompt !== null && picked.length === prompt.requiredCount && picked.every((id) => eligible.has(id));
-  const error = humanError(snapshot);
-  const actionButtons = prompt !== null
-    ? `<div class="goucha-prompt" role="group" aria-label="勾岔选择">
-        <div><span class="eyebrow">SPECIAL RESPONSE</span><strong>${prompt.addition === 'CHA' ? '岔' : '勾'} · ${rankLabel(prompt.rank)}</strong>
-          <small>${prompt.addition === 'CHA' ? '选两张同点数的牌' : '选一张同点数的牌'}</small></div>
-        <button class="button button-primary" data-action="confirm-goucha" ${!validGouCha || snapshot.isBusy ? 'disabled' : ''}>确认${prompt.addition === 'CHA' ? '岔' : '勾'}</button>
-        <button class="button button-quiet" data-action="decline-goucha" ${snapshot.isBusy ? 'disabled' : ''}>放弃</button>
-      </div>`
-    : `<div class="play-actions">
-        <button class="button button-quiet" data-action="clear" ${picked.length === 0 || snapshot.isBusy ? 'disabled' : ''}>清除</button>
-        <button class="button button-quiet" data-action="hint" ${!controls.showHint || snapshot.isBusy ? 'disabled' : ''}>提示 <kbd>H</kbd></button>
-        <button class="button button-secondary" data-action="pass" ${!controls.showPass || snapshot.isBusy ? 'disabled' : ''}>不出 <kbd>P</kbd></button>
-        <button class="button button-primary" data-action="play" ${!controls.playEnabled || snapshot.isBusy ? 'disabled' : ''}>出牌 <kbd>↵</kbd></button>
-      </div>`;
-  return `<div class="hand-controls">
-    <div class="selection-caption"><span>${picked.length ? `已选 ${picked.length} 张` : '点击手牌选择'}</span><span>${snapshot.state.currentPlayer === 0 && snapshot.state.phase === 'RESPONDING' ? '可压牌或不出' : ''}</span></div>
-    ${actionButtons}
-    <p class="inline-error" role="status">${escapeHtml(error)}</p>
-  </div>`;
+    <form id="start-form" class="start-form">
+      ${renderDeckChoice()}
+      <details class="seed-details">
+        <summary>指定种子（可复现同一局）</summary>
+        <div class="seed-entry"><span>#</span><input id="seed-input" name="seed" inputmode="numeric" pattern="[0-9]{1,10}" maxlength="10" value="${snapshot.state.rootSeed ?? session.seed}" aria-label="随机种子" aria-describedby="seed-error" /></div>
+      </details>
+      <p id="seed-error" class="form-error" role="alert"></p>
+      <button class="btn btn-play btn-wide" type="submit">开始游戏</button>
+      <button class="link" type="button" data-action="help">先看规则</button>
+    </form>
+  </section></div>`;
 }
 
 function renderResult(snapshot: BrowserSessionSnapshot): string {
   const result = snapshot.viewModel.result;
   if (result === null) return '';
-  const order = result.places.map((playerId, index) => `<li><span class="result-place">0${index + 1}</span><span>${playerName(playerId)}</span><i>${playerId % 2 === result.winningTeam ? 'WINNING TEAM' : 'OPPONENT'}</i></li>`).join('');
-  return `<div class="modal-scrim"><section class="result-card" role="dialog" aria-modal="true" aria-labelledby="result-title">
-    <span class="eyebrow">ROUND COMPLETE · ${formatSeed(result.seed)}</span>
-    <h2 id="result-title">${result.winningTeam === 0 ? '蓝队拿下这局' : '金队拿下这局'}</h2>
-    <p class="result-subtitle">抓 ${result.capturedOpponents} 人 · 单局结算</p>
+  const teams = snapshot.state.playerCount === 4;
+  const won = result.winningTeam === 0;
+  const winner = result.places[0]!;
+  const order = result.places.map((playerId, index) => `<li class="${(teams ? playerId % 2 === result.winningTeam : index === 0) ? 'is-winner' : ''}">
+      <span class="place">第 ${index + 1} 名</span><span>${escapeHtml(seatName(snapshot, playerId))}</span></li>`).join('');
+  const title = teams ? (won ? '你们队拿下这局！' : '对方拿下这局') : (won ? '你赢了！' : `${seatName(snapshot, winner)}先出完`);
+  const sub = teams ? `抓了 ${result.capturedOpponents} 人 · ${deckOption(shownDeckCount(snapshot)).label}` : `${snapshot.state.playerCount} 人 · 一副牌`;
+  return `<div class="modal"><section class="panel result-panel ${won ? 'is-win' : 'is-lose'}" role="dialog" aria-modal="true" aria-labelledby="result-title">
+    <div class="result-ribbon">${won ? '胜利' : '惜败'}</div>
+    <h2 id="result-title">${escapeHtml(title)}</h2>
+    <p class="result-sub">${escapeHtml(sub)} · 种子 ${escapeHtml(formatSeed(result.seed))}</p>
     <ol class="result-order">${order}</ol>
-    <div class="result-actions"><button class="button button-primary" data-action="replay">同种子重开</button><button class="button button-secondary" data-action="new-game">新开一局</button></div>
+    <div class="result-actions">
+      <button class="btn btn-hint" data-action="replay">同种子重开</button>
+      <button class="btn btn-play" data-action="new-game">再来一局</button>
+    </div>
   </section></div>`;
 }
 
 function renderHelp(): string {
   if (!helpOpen) return '';
-  return `<div class="modal-scrim" data-action="close-help">
-    <section class="help-card" role="dialog" aria-modal="true" aria-labelledby="help-title" data-dialog>
-      <button class="icon-button help-close" data-action="close-help" aria-label="关闭帮助">×</button>
-      <span class="eyebrow">QUICK RULES</span><h2 id="help-title">一局 4A4，四人两队</h2>
-      <p>座位 0 和 2 为蓝队，座位 1 和 3 为金队。每人 27 张牌，轮流严格压牌或选择不出。</p>
-      <div class="rule-grid"><article><b>牌型</b><span>单张、对子、单/双/三顺、轰/炸弹、王炸、4A4。</span></article>
-        <article><b>勾岔</b><span>单牌可以被另一人用同点数对子“岔”；岔后才轮到另一人用同点数单牌“勾”。不能自己接自己的牌。</span></article>
-        <article><b>结束</b><span>只剩一人有牌时结算；队友出完顺序决定抓人数。种子可复制分享并复现同一局。</span></article>
+  return `<div class="modal" data-action="close-help">
+    <section class="panel help-panel" role="dialog" aria-modal="true" aria-labelledby="help-title" data-dialog>
+      <button class="close" data-action="close-help" aria-label="关闭规则">×</button>
+      <h2 id="help-title">规则速览</h2>
+      <div class="rules">
+        <article><b>队伍</b><span>四人两队：你和对面的搭档一队，左右两家一队。两副牌每人 27 张；一副牌 54 张，每队一人 14 张、一人 13 张。三人或两人时各打各的，只用一副牌：三人每人 18 张；两人每人 22 张，另扣 10 张谁也看不到。</span></article>
+        <article><b>首家</b><span>持红桃 3 的玩家先出。两副牌时依次比较红桃 3、黑桃 3、梅花 3、方块 3 的张数，多者先出。</span></article>
+        <article><b>牌型</b><span>单张、对子、单/双/三顺、轰（3 张）/炸弹（4 张以上）、王炸、4A4（两张 4 加一张 A，最大）。</span></article>
+        <article><b>出牌</b><span>轮流压过上一手或选择不出；其他人都不要时，最后压住的人接着出，他已出完就由搭档接着出（借光）。</span></article>
+        <article><b>勾岔</b><span>单牌可以被别人用同点数的对子“岔”，岔之后才能用同点数单张“勾”，岔勾交替。有人岔过后链条一停，这一轮立刻结束，最后岔或勾的人接着出。</span></article>
+        <article><b>结算</b><span>第一个出完的人那队获胜，搭档之后出完的对手越少，抓的人越多。只剩一人有牌、或一队两人都出完时立刻结束，剩下的同队两人不用再打。</span></article>
       </div>
-      <button class="button button-primary" data-action="close-help">明白了</button>
+      <p class="help-tip">操作：点牌选择，按住横着滑可以一次选一串；快捷键 H 提示、P 不出、回车出牌。</p>
+      <button class="btn btn-play" data-action="close-help">明白了</button>
     </section>
   </div>`;
 }
 
-function renderStart(snapshot: BrowserSessionSnapshot): string {
-  if (snapshot.state.phase !== 'SETUP') return '';
-  return `<div class="modal-scrim start-scrim"><section class="start-card" role="dialog" aria-modal="true" aria-labelledby="start-title">
-    <span class="eyebrow">FOUR PLAYERS · TWO TEAMS · ONE ROUND</span>
-    <div class="hero-mark"><span>4</span><i>A</i><span>4</span></div>
-    <h1 id="start-title">一局 4A4</h1>
-    <p>把注意力留给牌桌。固定 2 对 2，三位基础 AI，完全离线。</p>
-    <form id="start-form" class="seed-form">
-      <label for="seed-input">随机种子 <span>相同种子会复现相同发牌与 AI 决策</span></label>
-      <div class="seed-entry"><span>#</span><input id="seed-input" name="seed" inputmode="numeric" pattern="[0-9]{1,10}" maxlength="10" value="${snapshot.state.rootSeed ?? session.seed}" aria-describedby="seed-error" /></div>
-      <p id="seed-error" class="inline-error" role="alert"></p>
-      <button class="button button-primary start-button" type="submit">开始练习 <span>→</span></button>
-    </form>
-    <div class="start-foot"><span>108 张牌 · 每人 27 张</span><span>规则版本 ${escapeHtml(snapshot.state.rulesVersion)}</span></div>
-  </section></div>`;
-}
-
 function render(snapshot: BrowserSessionSnapshot): void {
-  const state = snapshot.state;
-  const started = state.phase !== 'SETUP';
-  const seed = state.rootSeed ?? session.seed;
-  const disabled = snapshot.isBusy ? 'disabled' : '';
-  root!.innerHTML = `<div class="app-frame ${started ? 'has-game' : 'is-idle'}">
-    <header class="topbar">
-      <a class="brand" href="./" aria-label="4A4 首页"><span class="brand-mark">4A4</span><span class="brand-copy"><b>TABLE / 01</b><small>单局练习版</small></span></a>
-      <div class="topbar-center"><span class="live-indicator"></span>OFFLINE PRACTICE <i>·</i> 2V2</div>
-      <nav class="top-actions" aria-label="游戏工具">
-        <span class="seed-chip" title="固定种子">SEED ${escapeHtml(formatSeed(seed))}</span>
-        <button class="icon-button" data-action="help" aria-label="游戏规则" title="游戏规则">?</button>
-        <button class="button button-quiet new-game-top" data-action="new-game" ${disabled}>新开一局</button>
-      </nav>
-    </header>
-    <main>
-      <div class="table-heading"><div><span class="eyebrow">4A4 · SINGLE ROUND</span><h2>练习牌桌</h2></div>
-        <div class="round-progress"><span>固定队伍</span><b>0 / 2 <i>VS</i> 1 / 3</b></div></div>
-      <section class="table-grid" aria-label="4A4 牌桌">
-        ${renderSeat('top', snapshot)}
-        ${renderSeat('left', snapshot)}
-        ${renderCenter(snapshot)}
-        ${renderSeat('right', snapshot)}
-        <section class="hand-zone" aria-label="玩家手牌">
-          <div class="hand-header"><div><span class="eyebrow">YOUR HAND</span><h3>你的手牌 <span>${snapshot.viewModel.seats.bottom.remaining}</span></h3></div>
-            <div class="hand-hint">选中牌面加入组合 <i>·</i> 同点数牌会自动对齐</div></div>
-          <div class="hand-viewport">${renderHand(snapshot)}</div>
-          ${renderControls(snapshot)}
-        </section>
-      </section>
-      <footer class="page-footer"><span>纯离线 · 规则由 TypeScript 核心驱动</span><span>BUILD 01 <i>·</i> 4A4</span></footer>
+  const started = snapshot.state.phase !== 'SETUP';
+  const shake = flash !== null && performance.now() - flash.at < 450;
+  root!.innerHTML = `<div class="game ${started ? 'is-playing' : 'is-idle'}">
+    ${renderBar(snapshot)}
+    <main class="stage ${shake ? 'is-shaking' : ''} ${counterOpen && started ? 'has-counter' : ''}" aria-label="牌桌">
+      <div class="felt" aria-hidden="true"></div>
+      ${started ? `${renderSeat('top', snapshot)}${renderSeat('left', snapshot)}${renderSeat('right', snapshot)}
+        ${renderZone('top', snapshot)}${renderZone('left', snapshot)}${renderZone('right', snapshot)}${renderZone('bottom', snapshot)}` : ''}
+      ${renderCounter(snapshot)}
+      ${renderFlash()}
     </main>
+    <section class="dock" aria-label="你的手牌和操作">
+      ${started ? renderDock(snapshot) : ''}
+      ${renderHand(snapshot)}
+    </section>
     ${renderStart(snapshot)}${renderResult(snapshot)}${renderHelp()}
     <div class="toast ${notice ? 'is-visible' : ''}" role="status" aria-live="polite">${escapeHtml(notice)}</div>
   </div>`;
+}
+
+// --- Sounds and effects from what each shown frame did -----------------------------------------------------
+
+const BOMB_KINDS = new Set(['N_OF_KIND_BOMB', 'JOKER_BOMB', 'FOUR_A_FOUR']);
+
+function onSnapshot(snapshot: BrowserSessionSnapshot): void {
+  for (const event of snapshot.events) {
+    if (event.kind === 'CARDS_PLAYED') {
+      const cards = event.cardIds.flatMap((id) => {
+        const card = allCards.get(id);
+        return card === undefined ? [] : [card];
+      });
+      const pattern = recognize(cards);
+      if (BOMB_KINDS.has(pattern.kind)) {
+        const label = pattern.kind === 'JOKER_BOMB' ? '王炸' : pattern.kind === 'FOUR_A_FOUR' ? '4A4' : cards.length === 3 ? '轰' : '炸弹';
+        flash = { text: label, at: performance.now() };
+        window.clearTimeout(flashTimer);
+        flashTimer = window.setTimeout(() => render(session.snapshot()), FLASH_MS + 20);
+        playSound('bomb');
+      } else {
+        playSound('play');
+      }
+    } else if (event.kind === 'PLAYER_PASSED') {
+      playSound('pass');
+    } else if (event.kind === 'GOUCHA_ADDED') {
+      playSound('cha');
+    } else if (event.kind === 'TURN_CHANGED' && event.playerId === 0) {
+      playSound('turn');
+    } else if (event.kind === 'ROUND_FINISHED') {
+      playSound(snapshot.state.result?.winningTeam === 0 ? 'win' : 'lose');
+    }
+  }
+  render(snapshot);
 }
 
 function setNotice(message: string): void {
@@ -308,14 +478,29 @@ function setNotice(message: string): void {
   }, 2400);
 }
 
-function replaceSession(seed: number): void {
+function replaceSession(next: BrowserGameSession): void {
   unsubscribe();
   helpOpen = false;
-  session = new BrowserGameSession(seed);
-  unsubscribe = session.subscribe(render);
-  const url = new URL(window.location.href);
-  url.searchParams.set('seed', String(seed));
-  window.history.replaceState({}, '', url);
+  landed.clear();
+  flash = null;
+  session = next;
+  chosenDeckCount = next.deckCount;
+  chosenPlayerCount = next.playerCount;
+  unsubscribe = session.subscribe(onSnapshot);
+  // Keep the seed in the address so a game can be shared; embedded pages may refuse this, which is harmless.
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set('seed', String(next.seed));
+    url.searchParams.set('decks', String(next.deckCount));
+    url.searchParams.set('players', String(next.playerCount));
+    window.history.replaceState({}, '', url);
+  } catch {
+    // The game works the same without it.
+  }
+}
+
+function newSession(seed: number, deckCount: DeckCount, playerCount: PlayerCount): BrowserGameSession {
+  return new BrowserGameSession(seed, { deckCount, playerCount, animationDelayMs: MOVE_DELAY_MS });
 }
 
 function parseInputSeed(input: HTMLInputElement | null): number | null {
@@ -325,22 +510,127 @@ function parseInputSeed(input: HTMLInputElement | null): number | null {
   return Number.isSafeInteger(seed) && seed <= 0xffff_ffff ? seed : null;
 }
 
+// --- Input -------------------------------------------------------------------------------------------------
+
 root.addEventListener('submit', async (event) => {
   const form = event.target;
   if (!(form instanceof HTMLFormElement) || form.id !== 'start-form') return;
   event.preventDefault();
+  unlockAudio();
   const seedInput = form.querySelector<HTMLInputElement>('#seed-input');
   const seed = parseInputSeed(seedInput);
   if (seed === null) {
     const error = form.querySelector<HTMLElement>('#seed-error');
-    if (error) error.textContent = '请输入 0 到 4,294,967,295 之间的整数。';
+    if (error) error.textContent = '种子要是 0 到 4294967295 之间的整数。';
     seedInput?.focus();
     return;
   }
-  replaceSession(seed);
+  const deck = form.querySelector<HTMLInputElement>('input[name="deck"]:checked');
+  if (deck !== null) chosenDeckCount = deck.value === '1' ? 1 : 2;
+  const players = form.querySelector<HTMLInputElement>('input[name="players"]:checked');
+  if (players !== null) chosenPlayerCount = players.value === '2' ? 2 : players.value === '3' ? 3 : 4;
+  replaceSession(newSession(seed, chosenDeckCount, chosenPlayerCount));
   const started = await session.start();
   if (!started) setNotice(`无法开始游戏：${session.lastErrorCode ?? '未知错误'}`);
 });
+
+/**
+ * Dragging across the hand (mouse, pen or finger) picks every card it passes; starting on a picked card
+ * clears them instead. In a row the span between the first and the current card is picked; in rank
+ * columns, exactly the cards the pointer crosses, so a slide along the bottom picks one of each rank.
+ */
+let handDrag: {
+  pointer: number;
+  columns: boolean;
+  ids: string[];
+  base: string[];
+  from: number;
+  to: number;
+  selecting: boolean;
+  visited: Set<string>;
+  lastX: number;
+  lastY: number;
+  moved: boolean;
+} | null = null;
+/** Set when a drag ends; swallows the click that follows it. Every new press starts clean. */
+let suppressCardClick = false;
+
+function handCardAt(x: number, y: number): HTMLElement | null {
+  return document.elementFromPoint(x, y)?.closest<HTMLElement>('.hand-card[data-card-id]:not([disabled])') ?? null;
+}
+
+root.addEventListener('pointerdown', (event) => {
+  suppressCardClick = false;
+  unlockAudio();
+  if (event.button !== 0 || !(event.target instanceof Element)) return;
+  const card = event.target.closest<HTMLElement>('.hand-card[data-card-id]');
+  if (card === null || card.hasAttribute('disabled')) return;
+  const ids = [...root.querySelectorAll<HTMLElement>('.hand-card[data-card-id]:not([disabled])')].map((element) => element.dataset.cardId ?? '');
+  const id = card.dataset.cardId ?? '';
+  const from = ids.indexOf(id);
+  if (from < 0) return;
+  // A mouse press must not start a text selection; a touch must keep its default (the page may scroll).
+  if (event.pointerType !== 'touch') event.preventDefault();
+  // A touch is captured by the card it started on; release it so moves over other cards hit-test normally.
+  if (card.hasPointerCapture(event.pointerId)) card.releasePointerCapture(event.pointerId);
+  const base = [...session.selectedCardIds];
+  handDrag = {
+    pointer: event.pointerId,
+    columns: card.closest('.is-columns') !== null,
+    ids,
+    base,
+    from,
+    to: from,
+    selecting: !base.includes(id),
+    visited: new Set([id]),
+    lastX: event.clientX,
+    lastY: event.clientY,
+    moved: false,
+  };
+});
+
+window.addEventListener('pointermove', (event) => {
+  const drag = handDrag;
+  if (drag === null || drag.pointer !== event.pointerId) return;
+  if (!drag.columns) {
+    const index = drag.ids.indexOf(handCardAt(event.clientX, event.clientY)?.dataset.cardId ?? '');
+    if (index < 0 || index === drag.to) return;
+    drag.to = index;
+    drag.moved = true;
+    session.setSelection(dragSelection(drag.base, drag.ids, drag.from, index));
+    return;
+  }
+  // Sample the path since the last move, so a quick slide does not skip a column.
+  const steps = Math.max(1, Math.ceil(Math.hypot(event.clientX - drag.lastX, event.clientY - drag.lastY) / 8));
+  let changed = false;
+  for (let step = 1; step <= steps; step += 1) {
+    const x = drag.lastX + (event.clientX - drag.lastX) * (step / steps);
+    const y = drag.lastY + (event.clientY - drag.lastY) * (step / steps);
+    const id = handCardAt(x, y)?.dataset.cardId;
+    if (id !== undefined && !drag.visited.has(id)) {
+      drag.visited.add(id);
+      changed = true;
+    }
+  }
+  drag.lastX = event.clientX;
+  drag.lastY = event.clientY;
+  if (!changed) return;
+  drag.moved = true;
+  const next = drag.selecting
+    ? [...drag.base, ...[...drag.visited].filter((id) => !drag.base.includes(id))]
+    : drag.base.filter((id) => !drag.visited.has(id));
+  session.setSelection(next);
+});
+
+function endHandDrag(event: PointerEvent): void {
+  if (handDrag === null || handDrag.pointer !== event.pointerId) return;
+  // The click that follows a drag must not toggle the card it ended on.
+  suppressCardClick = handDrag.moved;
+  if (handDrag.moved) playSound('select');
+  handDrag = null;
+}
+window.addEventListener('pointerup', endHandDrag);
+window.addEventListener('pointercancel', endHandDrag);
 
 root.addEventListener('click', async (event) => {
   const target = event.target;
@@ -349,13 +639,27 @@ root.addEventListener('click', async (event) => {
   if (button === null || button.hasAttribute('disabled')) return;
   const action = button.dataset.action;
   if (action === 'toggle-card') {
+    if (suppressCardClick) {
+      suppressCardClick = false;
+      return;
+    }
     const cardId = button.dataset.cardId;
-    if (cardId !== undefined) session.toggleCard(cardId);
+    if (cardId !== undefined) {
+      session.toggleCard(cardId);
+      playSound('select');
+    }
     return;
   }
   if (action === 'help') { helpOpen = true; render(session.snapshot()); return; }
   if (action === 'close-help') {
     if (target === button || target === button.parentElement) { helpOpen = false; render(session.snapshot()); }
+    return;
+  }
+  if (action === 'counter') { counterOpen = !counterOpen; render(session.snapshot()); return; }
+  if (action === 'sound') {
+    setMuted(!isMuted());
+    unlockAudio();
+    render(session.snapshot());
     return;
   }
   if (action === 'hint') { session.cycleHint(); return; }
@@ -371,26 +675,37 @@ root.addEventListener('click', async (event) => {
   }
   if (action === 'decline-goucha') { await session.declineGouCha(); return; }
   if (action === 'replay') {
-    replaceSession(session.seed);
+    replaceSession(session.replay());
     await session.start();
     return;
   }
   if (action === 'new-game') {
-    replaceSession(Date.now() >>> 0);
+    replaceSession(newSession(Date.now() >>> 0, session.deckCount, session.playerCount));
     return;
+  }
+});
+
+// Switching the version on the start screen keeps the form as typed.
+root.addEventListener('change', (event) => {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement) || !input.checked) return;
+  if (input.name === 'deck') chosenDeckCount = input.value === '1' ? 1 : 2;
+  if (input.name === 'players') {
+    chosenPlayerCount = input.value === '2' ? 2 : input.value === '3' ? 3 : 4;
+    // The deck choice only applies to four players.
+    const decks = root.querySelector<HTMLElement>('.deck-options[aria-label="牌数"]');
+    if (decks !== null) decks.hidden = chosenPlayerCount !== 4;
   }
 });
 
 root.addEventListener('keydown', async (event) => {
   if (event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
-  if (event.target instanceof HTMLInputElement) {
-    if (event.key === 'Enter' && event.target.id === 'seed-input') return;
-    return;
-  }
+  if (event.target instanceof HTMLInputElement) return;
+  if (event.key === 'Escape' && helpOpen) { helpOpen = false; render(session.snapshot()); return; }
+  if (session.state.phase === 'SETUP' || helpOpen) return;
   if (event.key.toLowerCase() === 'h') session.cycleHint();
   if (event.key.toLowerCase() === 'p') await session.pass();
   if (event.key === 'Enter') await session.playSelection();
-  if (event.key === 'Escape' && helpOpen) { helpOpen = false; render(session.snapshot()); }
 });
 
 render(session.snapshot());

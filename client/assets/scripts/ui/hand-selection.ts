@@ -50,6 +50,27 @@ export function selectRange(
   return { ...ui, selectedCardIds: available.filter((id) => chosen.has(id)), hintIndex: 0 };
 }
 
+/**
+ * Selection while dragging across the hand from card `from` to card `to` (indices into `orderedIds`, the
+ * hand as shown). The first card decides the direction: starting on an unselected card selects the whole
+ * span, starting on a selected card clears it. Cards outside the span keep their `base` selection, so
+ * dragging back shrinks the span again.
+ */
+export function dragSelection(
+  base: readonly string[],
+  orderedIds: readonly string[],
+  from: number,
+  to: number,
+): string[] {
+  const first = orderedIds[from];
+  if (first === undefined) return [...base];
+  const ui: HumanUiState = { humanPlayerId: 0, selectedCardIds: base, hintIndex: 0 };
+  const result = selectRange(ui, orderedIds, from, to, !base.includes(first)).selectedCardIds;
+  // Keep selected cards that are not in `orderedIds` (e.g. not draggable right now) as they were.
+  const outside = base.filter((id) => !orderedIds.includes(id));
+  return [...outside, ...result];
+}
+
 export function clearSelection(ui: HumanUiState): HumanUiState {
   return { ...ui, selectedCardIds: [], hintIndex: 0 };
 }

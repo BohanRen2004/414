@@ -18,7 +18,13 @@ describe('round result', () => {
   });
 
   it('rejects incomplete or duplicate finish orders', () => {
-    expect(() => buildResult([0, 1, 2])).toThrow(/four unique players/);
-    expect(() => buildResult([0, 1, 1, 3])).toThrow(/four unique players/);
+    expect(() => buildResult([0, 1, 2])).toThrow(/4 unique players/);
+    expect(() => buildResult([0, 1, 1, 3])).toThrow(/4 unique players/);
+    expect(() => buildResult([0, 3, 1], 3)).toThrow(/3 unique players/);
+  });
+
+  it('crowns the first one out when two or three play alone', () => {
+    expect(buildResult([2, 0, 1], 3)).toEqual({ finishOrder: [2, 0, 1], winningTeam: 2, capturedOpponents: 0 });
+    expect(buildResult([1, 0], 2)).toEqual({ finishOrder: [1, 0], winningTeam: 1, capturedOpponents: 0 });
   });
 });
