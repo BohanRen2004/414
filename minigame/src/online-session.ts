@@ -1,5 +1,5 @@
 import { PlayerId } from '../../client/assets/scripts/core/cards/card';
-import { DeckCount } from '../../client/assets/scripts/core/cards/deck';
+import { DeckCount, PlayerCount } from '../../client/assets/scripts/core/cards/deck';
 import { createSetupState } from '../../client/assets/scripts/core/rules/reducer';
 import { GameAction } from '../../client/assets/scripts/core/state/game-action';
 import { GameEvent } from '../../client/assets/scripts/core/state/game-event';
@@ -151,6 +151,10 @@ export class OnlineSession {
 
   public start(): Promise<boolean> {
     return this.request({ type: 'start', roomId: this.room.roomId, cursor: this.cursor });
+  }
+
+  public setPlayerCount(playerCount: PlayerCount): Promise<boolean> {
+    return this.request({ type: 'players', roomId: this.room.roomId, playerCount });
   }
 
   public setDeckCount(deckCount: DeckCount): Promise<boolean> {

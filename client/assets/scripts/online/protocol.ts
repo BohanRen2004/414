@@ -1,5 +1,5 @@
 import { PlayerId } from '../core/cards/card';
-import { DeckCount } from '../core/cards/deck';
+import { DeckCount, PlayerCount } from '../core/cards/deck';
 import { GameAction } from '../core/state/game-action';
 import { GameEvent } from '../core/state/game-event';
 import { WireState } from './wire';
@@ -31,11 +31,12 @@ export interface SyncCursor {
 type InRoom<T> = T & { readonly roomId: string; readonly cursor?: SyncCursor | null };
 
 export type RoomRequest =
-  | { readonly type: 'create'; readonly nickname: string; readonly deckCount: DeckCount }
+  | { readonly type: 'create'; readonly nickname: string; readonly deckCount: DeckCount; readonly playerCount?: PlayerCount }
   | { readonly type: 'join'; readonly code: string; readonly nickname: string }
   | InRoom<{ readonly type: 'sync' }>
   | InRoom<{ readonly type: 'seat'; readonly seat: PlayerId }>
   | InRoom<{ readonly type: 'deck'; readonly deckCount: DeckCount }>
+  | InRoom<{ readonly type: 'players'; readonly playerCount: PlayerCount }>
   | InRoom<{ readonly type: 'start' }>
   | InRoom<{ readonly type: 'move'; readonly move: SeatMove }>
   | InRoom<{ readonly type: 'auto'; readonly on: boolean }>
@@ -53,7 +54,8 @@ export type RoomErrorCode =
   | 'SEAT_TAKEN'
   | 'WRONG_STATUS'
   | 'BUSY'
-  | 'RULE_REJECTED';
+  | 'RULE_REJECTED'
+  | 'TOO_MANY_PLAYERS';
 
 export interface SeatView {
   readonly kind: 'empty' | 'ai' | 'human';
@@ -70,6 +72,8 @@ export interface RoomView {
   readonly code: string;
   readonly status: 'lobby' | 'playing' | 'closed';
   readonly deckCount: DeckCount;
+  /** Table size (2, 3 or 4); only the first this many seats are used. */
+  readonly playerCount: PlayerCount;
   readonly isHost: boolean;
   readonly mySeat: PlayerId | null;
   readonly seats: readonly [SeatView, SeatView, SeatView, SeatView];

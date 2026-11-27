@@ -335,7 +335,8 @@ export interface LobbyScreen {
   readonly subtitle: string;
   readonly seats: readonly LobbySeatScreen[];
   readonly deckCount: DeckCount;
-  /** Whether the viewer may change the deck version (the host). */
+  readonly playerCount: PlayerCount;
+  /** Whether the viewer may change the table size and deck version (the host). */
   readonly deckEditable: boolean;
   readonly buttons: readonly ButtonScreen[];
   readonly note: string;
@@ -346,14 +347,16 @@ const SEAT_ACTIONS = ['seat-0', 'seat-1', 'seat-2', 'seat-3'] as const satisfies
 
 /** The room before a game: who sits where (teams are seats 1+3 and 2+4), the version, and the host's start button. */
 export function buildLobbyScreen(room: RoomView, isBusy: boolean, errorCode: string | null): LobbyScreen {
-  const option = deckOption(room.deckCount);
+  const size = room.playerCount;
+  const teams = size === 4;
+  const option = deckOption(teams ? room.deckCount : 1);
   const humans = room.seats.filter((seat) => seat.kind === 'human').length;
-  const seats = room.seats.map((seat, index): LobbySeatScreen => {
+  const seats = room.seats.slice(0, size).map((seat, index): LobbySeatScreen => {
     const playerId = index as PlayerId;
     const empty = seat.kind === 'empty';
     return {
       seat: playerId,
-      team: (playerId % 2) as TeamId,
+      team: (teams ? playerId % 2 : playerId) as TeamId,
       label: seat.isMe ? `你（${seat.name}）` : empty ? '空位' : seat.name,
       detail: [seat.isHost ? '房主' : '', empty ? (room.mySeat === null ? '开局时 AI 补位' : '点这里换座 · 开局时 AI 补位') : ''].filter(Boolean).join(' · '),
       isMe: seat.isMe,
@@ -363,16 +366,19 @@ export function buildLobbyScreen(room: RoomView, isBusy: boolean, errorCode: str
   });
   return {
     title: `房间 ${room.code}`,
-    subtitle: `${option.label} · ${option.summary} · ${humans} 位玩家`,
+    subtitle: `${size} 人 · ${teams ? `${option.label} · ${option.summary}` : playerOption(size).summary} · 已到 ${humans} 位`,
     seats,
     deckCount: room.deckCount,
+    playerCount: size,
     deckEditable: room.isHost && !isBusy,
     buttons: [
       { id: 'leave-room', label: '离开', enabled: !isBusy, style: 'quiet' },
-      { id: 'invite', label: '邀请好友', enabled: !isBusy && humans < 4, style: 'secondary' },
-      ...(room.isHost ? [{ id: 'start-online', label: humans < 4 ? '开始（AI 补位）' : '开始', enabled: !isBusy, style: 'primary' } as const] : []),
+      { id: 'invite', label: '邀请好友', enabled: !isBusy && humans < size, style: 'secondary' },
+      ...(room.isHost ? [{ id: 'start-online', label: humans < size ? '开始（AI 补位）' : '开始', enabled: !isBusy, style: 'primary' } as const] : []),
     ],
-    note: room.isHost ? '同队的人坐对面：1 号和 3 号一队，2 号和 4 号一队。' : '等房主开始。同队的人坐对面。',
+    note: teams
+      ? (room.isHost ? '同队的人坐对面：1 号和 3 号一队，2 号和 4 号一队。' : '等房主开始。同队的人坐对面。')
+      : (room.isHost ? '各打各的，一副牌，谁先出完谁赢。' : '等房主开始。各打各的，谁先出完谁赢。'),
     error: errorMessage(errorCode),
   };
 }

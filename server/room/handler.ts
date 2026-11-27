@@ -1,11 +1,11 @@
 import { PlayerId } from '../../client/assets/scripts/core/cards/card';
-import { isDeckCount } from '../../client/assets/scripts/core/cards/deck';
+import { isDeckCount, isPlayerCount } from '../../client/assets/scripts/core/cards/deck';
 import {
   NICKNAME_MAX_LENGTH, ROOM_CODE_LENGTH, RoomRequest, RoomResponse, SeatMove, SyncCursor,
 } from '../../client/assets/scripts/online/protocol';
 import {
   EngineResult, RoomRecord, applyMove, backToLobby, gameSync, joinRoom, leaveRoom, moveSeat, newRoom, roomView,
-  seatOf, setAuto, setDeckCount, startGame, tick,
+  seatOf, setAuto, setDeckCount, setPlayerCount, startGame, tick,
 } from './engine';
 
 /** Where rooms live: the cloud database in production, a Map in tests. */
@@ -85,7 +85,9 @@ export function parseRequest(raw: unknown): RoomRequest | null {
   if (!isRecord(raw) || typeof raw.type !== 'string') return null;
   if (raw.type === 'create') {
     const nickname = cleanNickname(raw.nickname);
-    return nickname !== null && isDeckCount(raw.deckCount) ? { type: 'create', nickname, deckCount: raw.deckCount } : null;
+    if (nickname === null || !isDeckCount(raw.deckCount)) return null;
+    if (raw.playerCount === undefined) return { type: 'create', nickname, deckCount: raw.deckCount };
+    return isPlayerCount(raw.playerCount) ? { type: 'create', nickname, deckCount: raw.deckCount, playerCount: raw.playerCount } : null;
   }
   if (raw.type === 'join') {
     const nickname = cleanNickname(raw.nickname);
@@ -100,6 +102,7 @@ export function parseRequest(raw: unknown): RoomRequest | null {
       return { ...base, type: raw.type };
     case 'seat': return isSeat(raw.seat) ? { ...base, type: 'seat', seat: raw.seat } : null;
     case 'deck': return isDeckCount(raw.deckCount) ? { ...base, type: 'deck', deckCount: raw.deckCount } : null;
+    case 'players': return isPlayerCount(raw.playerCount) ? { ...base, type: 'players', playerCount: raw.playerCount } : null;
     case 'auto': return typeof raw.on === 'boolean' ? { ...base, type: 'auto', on: raw.on } : null;
     case 'move': {
       const move = parseMove(raw.move);
@@ -136,7 +139,7 @@ async function createRoom(store: RoomStore, context: RequestContext, request: Ex
   for (let attempt = 0; attempt < 20; attempt += 1) {
     const code = randomCode(context);
     if (isOpen(await store.findOpenByCode(code), context.now())) continue;
-    const room = newRoom(randomId(context), code, context.openid, request.nickname, request.deckCount, context.now());
+    const room = newRoom(randomId(context), code, context.openid, request.nickname, request.deckCount, context.now(), request.playerCount ?? 4);
     await store.insert(room);
     return reply(room, context, undefined);
   }
@@ -189,6 +192,7 @@ export async function handleRoomRequest(store: RoomStore, context: RequestContex
   switch (request.type) {
     case 'seat': return update(store, context, load, (room) => moveSeat(room, openid, request.seat, now), cursor);
     case 'deck': return update(store, context, load, (room) => setDeckCount(room, openid, request.deckCount, now), cursor);
+    case 'players': return update(store, context, load, (room) => setPlayerCount(room, openid, request.playerCount, now), cursor);
     case 'start': return update(store, context, load, (room) => startGame(room, openid, context.randomUint32(), now), cursor ?? null);
     case 'move': return update(store, context, load, (room) => applyMove(room, openid, request.move, now), cursor ?? null);
     case 'auto': return update(store, context, load, (room) => setAuto(room, openid, request.on, now), cursor ?? null);

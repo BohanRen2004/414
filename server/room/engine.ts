@@ -1,7 +1,7 @@
 import { buildObservation } from '../../client/assets/scripts/ai/ai-observation';
 import { chooseBasicAiAction } from '../../client/assets/scripts/ai/basic-ai';
 import { PlayerId } from '../../client/assets/scripts/core/cards/card';
-import { DeckCount } from '../../client/assets/scripts/core/cards/deck';
+import { DeckCount, PlayerCount } from '../../client/assets/scripts/core/cards/deck';
 import { applyAction, createSetupState } from '../../client/assets/scripts/core/rules/reducer';
 import { GameAction } from '../../client/assets/scripts/core/state/game-action';
 import { GamePhase, GameState } from '../../client/assets/scripts/core/state/game-state';
@@ -35,6 +35,8 @@ export interface RoomGame {
   readonly gameNo: number;
   readonly seed: number;
   readonly deckCount: DeckCount;
+  /** Table size of this game; older records without it were four-player games. */
+  readonly playerCount?: PlayerCount;
   /** Every accepted action after the deal, AI moves included, in order. */
   readonly actions: readonly GameAction[];
   /** The human decision the game waits on, keyed by the action count at which it opened. */
@@ -49,6 +51,8 @@ export interface RoomRecord {
   readonly status: 'lobby' | 'playing' | 'closed';
   readonly hostOpenid: string;
   readonly deckCount: DeckCount;
+  /** Table size the host picked (2, 3 or 4); seats from this number on stay empty. Absent means 4. */
+  readonly playerCount?: PlayerCount;
   readonly seats: Seats;
   readonly gameCount: number;
   readonly game: RoomGame | null;
@@ -96,13 +100,14 @@ function isActivePhase(phase: GamePhase): boolean {
   return phase === 'FREE_LEAD' || phase === 'RESPONDING' || phase === 'GOUCHA_QUERY';
 }
 
-export function newRoom(id: string, code: string, openid: string, nickname: string, deckCount: DeckCount, now: number): RoomRecord {
+export function newRoom(id: string, code: string, openid: string, nickname: string, deckCount: DeckCount, now: number, playerCount: PlayerCount = 4): RoomRecord {
   return {
     id,
     code,
     status: 'lobby',
     hostOpenid: openid,
     deckCount,
+    playerCount,
     seats: [{ kind: 'human', openid, nickname, auto: false, left: false }, null, null, null],
     gameCount: 0,
     game: null,
@@ -121,7 +126,7 @@ export interface Replay {
 }
 
 /** Rebuild the game from its seed and action log, collecting the frames each viewer would have been shown. */
-export function replayGame(game: Pick<RoomGame, 'seed' | 'deckCount' | 'actions'>, viewers: readonly PlayerId[] = []): Replay {
+export function replayGame(game: Pick<RoomGame, 'seed' | 'deckCount' | 'actions' | 'playerCount'>, viewers: readonly PlayerId[] = []): Replay {
   const setup = createSetupState();
   const presenters = viewers.map((viewer) => new SeatPresenter(viewer, setup));
   const frames = new Map<PlayerId, SeatFrame[]>(viewers.map((viewer) => [viewer, []]));
@@ -134,7 +139,7 @@ export function replayGame(game: Pick<RoomGame, 'seed' | 'deckCount' | 'actions'
     }
     return result.state;
   };
-  let state = step(setup, { kind: 'START_GAME', seed: game.seed, deckCount: game.deckCount });
+  let state = step(setup, { kind: 'START_GAME', seed: game.seed, deckCount: game.deckCount, playerCount: game.playerCount ?? 4 });
   for (const action of game.actions) state = step(state, action);
   return { state, frames };
 }
@@ -199,7 +204,7 @@ export function joinRoom(room: RoomRecord, openid: string, nickname: string, now
     return { ok: true, room: { ...room, seats, updatedAt: now }, notify: present(seats) };
   }
   if (room.status !== 'lobby') return fail('GAME_IN_PROGRESS');
-  const empty = room.seats.findIndex((occupant) => occupant === null);
+  const empty = room.seats.findIndex((occupant, index) => occupant === null && index < tableSize(room));
   if (empty < 0) return fail('ROOM_FULL');
   const seats = withSeat(room.seats, empty as PlayerId, { kind: 'human', openid, nickname, auto: false, left: false });
   return { ok: true, room: { ...room, seats, updatedAt: now }, notify: present(seats) };
@@ -210,7 +215,7 @@ export function moveSeat(room: RoomRecord, openid: string, target: PlayerId, now
   const seat = seatOf(room, openid);
   if (seat === null) return fail('NOT_IN_ROOM');
   if (seat === target) return { ok: true, room, notify: [] };
-  if (room.seats[target] !== null) return fail('SEAT_TAKEN');
+  if (room.seats[target] !== null || target >= tableSize(room)) return fail('SEAT_TAKEN');
   const seats = withSeat(withSeat(room.seats, target, room.seats[seat]), seat, null);
   return { ok: true, room: { ...room, seats, updatedAt: now }, notify: present(seats) };
 }
@@ -222,15 +227,34 @@ export function setDeckCount(room: RoomRecord, openid: string, deckCount: DeckCo
   return { ok: true, room: { ...room, deckCount, updatedAt: now }, notify: present(room.seats) };
 }
 
-/** Host only: empty seats get the AI and the deal comes from the server's random seed. */
+/** Seats at the table: 4 unless the host picked fewer. */
+export function tableSize(room: RoomRecord): PlayerCount {
+  return room.playerCount ?? 4;
+}
+
+/**
+ * Host only, in the lobby: play with 2, 3 or 4. Shrinking needs the seats it drops to be empty; fewer than
+ * four always play with one deck.
+ */
+export function setPlayerCount(room: RoomRecord, openid: string, playerCount: PlayerCount, now: number): EngineResult {
+  if (room.status !== 'lobby') return fail('WRONG_STATUS');
+  if (room.hostOpenid !== openid) return fail('NOT_HOST');
+  if (tableSize(room) === playerCount) return { ok: true, room, notify: [] };
+  if (room.seats.some((occupant, index) => occupant !== null && index >= playerCount)) return fail('TOO_MANY_PLAYERS');
+  return { ok: true, room: { ...room, playerCount, updatedAt: now }, notify: present(room.seats) };
+}
+
+/** Host only: empty seats at the table get the AI and the deal comes from the server's random seed. */
 export function startGame(room: RoomRecord, openid: string, seed: number, now: number): EngineResult {
   if (room.status !== 'lobby') return fail('WRONG_STATUS');
   if (room.hostOpenid !== openid) return fail('NOT_HOST');
-  const seats = room.seats.map((occupant) => occupant ?? { kind: 'ai' }) as unknown as Seats;
+  const size = tableSize(room);
+  const seats = room.seats.map((occupant, index) => (index < size ? occupant ?? { kind: 'ai' } : null)) as unknown as Seats;
   const game: RoomGame = {
     gameNo: room.gameCount + 1,
     seed: seed >>> 0,
-    deckCount: room.deckCount,
+    deckCount: size === 4 ? room.deckCount : 1,
+    playerCount: size,
     actions: [],
     turn: null,
     frameCounts: [0, 0, 0, 0],
@@ -324,6 +348,7 @@ export function roomView(room: RoomRecord, openid: string): RoomView {
     code: room.code,
     status: room.status,
     deckCount: room.deckCount,
+    playerCount: tableSize(room),
     isHost: room.hostOpenid === openid,
     mySeat,
     seats,

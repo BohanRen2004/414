@@ -733,32 +733,43 @@ export function drawLobbyFrame(ctx: Canvas2D, view: Viewport, lobby: LobbyScreen
   text(ctx, fit(ctx, lobby.subtitle, 12, w - pad * 2 - 230), r.x + pad + 160, r.y + 27, 12, COLOR.panelMuted);
   drawButton(ctx, { id: 'help', label: '规则', enabled: true, style: 'quiet' }, { x: r.x + w - pad - 56, y: r.y + 12, w: 56, h: 28 }, regions);
 
-  // Version toggle (the host may change it).
+  // Table size, then (four players only) the deck version; the host may change them.
   const toggleY = r.y + 50;
-  const toggleW = 80;
-  DECK_OPTIONS.forEach((option, index) => {
-    const box = { x: r.x + pad + index * (toggleW + 8), y: toggleY, w: toggleW, h: 28 };
-    const chosen = option.deckCount === lobby.deckCount;
+  const toggle = (box: Rect, label: string, chosen: boolean, action: ActionId) => {
     roundRect(ctx, box, 14);
     ctx.fillStyle = chosen ? '#fff0c4' : '#ffffff';
     ctx.fill();
     ctx.lineWidth = 2;
     ctx.strokeStyle = chosen ? COLOR.goldDeep : COLOR.panelLine;
     ctx.stroke();
-    text(ctx, option.label, box.x + box.w / 2, box.y + 14, 13, COLOR.panelInk, 'center', 800);
-    if (lobby.deckEditable && !chosen) regions.push({ rect: box, action: option.deckCount === 1 ? 'deck-1' : 'deck-2' });
-  });
-  text(ctx, fit(ctx, lobby.note, 11, w - pad * 2 - toggleW * 2 - 24), r.x + pad + toggleW * 2 + 20, toggleY + 14, 11, COLOR.panelMuted);
+    text(ctx, label, box.x + box.w / 2, box.y + 14, 13, COLOR.panelInk, 'center', 800);
+    if (lobby.deckEditable && !chosen) regions.push({ rect: box, action });
+  };
+  let toggleX = r.x + pad;
+  for (const size of [4, 3, 2] as const) {
+    toggle({ x: toggleX, y: toggleY, w: 54, h: 28 }, `${size} 人`, lobby.playerCount === size, `players-${size}`);
+    toggleX += 60;
+  }
+  if (lobby.playerCount === 4) {
+    toggleX += 8;
+    DECK_OPTIONS.forEach((option) => {
+      toggle({ x: toggleX, y: toggleY, w: 72, h: 28 }, option.label, option.deckCount === lobby.deckCount, option.deckCount === 1 ? 'deck-1' : 'deck-2');
+      toggleX += 78;
+    });
+  }
+  const noteX = toggleX + 10;
+  text(ctx, fit(ctx, lobby.note, 11, r.x + w - pad - noteX), noteX, toggleY + 14, 11, COLOR.panelMuted);
 
-  // Seats: team of seats 1 and 3 on the left, seats 2 and 4 on the right.
+  // Seats. Four players: seats 1 and 3 (blue) on the left, 2 and 4 (gold) on the right. Fewer: one per slot.
   const gridTop = toggleY + 42;
   const buttonsH = 40;
   const gridH = r.y + h - pad - buttonsH - 26 - gridTop;
+  const teams = lobby.playerCount === 4;
   const colW = (w - pad * 2 - 12) / 2;
   const slotH = (gridH - 10) / 2;
   for (const seat of lobby.seats) {
-    const column = seat.team;
-    const row = seat.seat < 2 ? 0 : 1;
+    const column = teams ? seat.team : seat.seat % 2;
+    const row = teams ? (seat.seat < 2 ? 0 : 1) : Math.floor(seat.seat / 2);
     const box = { x: r.x + pad + column * (colW + 12), y: gridTop + row * (slotH + 10), w: colW, h: slotH };
     roundRect(ctx, box, 12);
     ctx.fillStyle = seat.isMe ? '#fff0c4' : seat.empty ? '#f5efe0' : '#ffffff';
@@ -766,18 +777,19 @@ export function drawLobbyFrame(ctx: Canvas2D, view: Viewport, lobby: LobbyScreen
     ctx.lineWidth = 2;
     ctx.strokeStyle = seat.isMe ? COLOR.goldDeep : COLOR.panelLine;
     ctx.stroke();
-    const teamColor = seat.team === 0 ? COLOR.team0 : COLOR.team1;
     ctx.beginPath();
     ctx.arc(box.x + 26, box.y + slotH / 2, 14, 0, Math.PI * 2);
-    ctx.fillStyle = teamColor;
+    ctx.fillStyle = TEAM_COLORS[seat.team] ?? COLOR.team0;
     ctx.fill();
     text(ctx, `${seat.seat + 1}`, box.x + 26, box.y + slotH / 2 + 1, 13, '#ffffff', 'center', 900);
     text(ctx, fit(ctx, seat.label, 15, box.w - 70, 800), box.x + 50, box.y + slotH / 2 - (seat.detail ? 8 : 0), 15, seat.empty ? COLOR.panelMuted : COLOR.panelInk, 'left', 800);
     if (seat.detail) text(ctx, fit(ctx, seat.detail, 11, box.w - 64), box.x + 50, box.y + slotH / 2 + 12, 11, COLOR.panelMuted);
     if (seat.action !== null) regions.push({ rect: box, action: seat.action });
   }
-  text(ctx, '蓝队', r.x + pad + colW, gridTop - 9, 10, COLOR.team0, 'right', 800);
-  text(ctx, '金队', r.x + pad + colW * 2 + 12, gridTop - 9, 10, COLOR.team1, 'right', 800);
+  if (teams) {
+    text(ctx, '蓝队', r.x + pad + colW, gridTop - 9, 10, COLOR.team0, 'right', 800);
+    text(ctx, '金队', r.x + pad + colW * 2 + 12, gridTop - 9, 10, COLOR.team1, 'right', 800);
+  }
 
   if (lobby.error) text(ctx, fit(ctx, lobby.error, 12, w - pad * 2), r.x + pad, r.y + h - pad - buttonsH - 12, 12, COLOR.red, 'left', 700);
   const count = lobby.buttons.length;

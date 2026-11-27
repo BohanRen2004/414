@@ -219,6 +219,50 @@ describe('room requests', () => {
     expect(chas).toBeGreaterThan(0);
   });
 
+  it('runs a three-player room: the host picks the size, the AI fills the third seat, the first out wins', async () => {
+    const harness = new Harness();
+    const { roomId, code } = await setUpRoom(harness, ['amy']);
+    expect(await harness.call('amy', { type: 'players', roomId, playerCount: 3 })).toEqual({ ok: false, code: 'NOT_HOST' });
+    const view = (await harness.ok('host', { type: 'players', roomId, playerCount: 3 })).room;
+    expect(view.playerCount).toBe(3);
+    // Seat 4 is off the table: nobody can join or move there.
+    await harness.ok('bo', { type: 'join', code, nickname: 'bo' });
+    expect(await harness.call('cy', { type: 'join', code, nickname: 'cy' })).toEqual({ ok: false, code: 'ROOM_FULL' });
+    expect((await harness.call('bo', { type: 'seat', roomId, seat: 3 })).ok).toBe(false);
+    // Shrinking to two would drop bo.
+    expect(await harness.call('host', { type: 'players', roomId, playerCount: 2 })).toEqual({ ok: false, code: 'TOO_MANY_PLAYERS' });
+    await harness.ok('bo', { type: 'leave', roomId });
+
+    const host = new Client('host');
+    const amy = new Client('amy');
+    host.absorb(await harness.ok('host', { type: 'start', roomId, cursor: null }));
+    expect(harness.store.rooms.get(roomId)!.seats.map((seat) => seat?.kind ?? null)).toEqual(['human', 'human', 'ai', null]);
+    await playOut(harness, roomId, [host, amy]);
+    const truth = harness.authoritative(roomId);
+    expect(truth.playerCount).toBe(3);
+    expect(truth.result).toMatchObject({ capturedOpponents: 0, winningTeam: truth.finishOrder[0] });
+  });
+
+  it('never sends the cards a two-player game sets aside', async () => {
+    const harness = new Harness();
+    const created = await harness.ok('host', { type: 'create', nickname: '房主', deckCount: 1, playerCount: 2 });
+    const roomId = created.room.roomId;
+    expect(created.room.playerCount).toBe(2);
+    await harness.ok('amy', { type: 'join', code: created.room.code, nickname: 'amy' });
+    const host = new Client('host');
+    const amy = new Client('amy');
+    host.absorb(await harness.ok('host', { type: 'start', roomId, cursor: null }));
+    const buried = harness.authoritative(roomId).buriedCardIds;
+    expect(buried).toHaveLength(10);
+    await playOut(harness, roomId, [host, amy]);
+    for (const client of [host, amy]) {
+      client.absorb(await harness.ok(client.openid, { type: 'sync', roomId, cursor: client.cursor }));
+      for (const text of client.seen) {
+        for (const id of buried) expect(text.includes(`"${id}"`), id).toBe(false);
+      }
+    }
+  });
+
   it('never sends a card another seat still holds', async () => {
     const harness = new Harness();
     const { roomId } = await setUpRoom(harness, ['amy']);

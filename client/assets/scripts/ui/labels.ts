@@ -108,6 +108,7 @@ const ERROR_MESSAGES: Readonly<Record<string, string>> = {
   'NETWORK': '网络不太好，请再试一次。',
   'ROOM_NOT_FOUND': '房间不存在或已经关闭。',
   'ROOM_FULL': '房间已满。',
+  'TOO_MANY_PLAYERS': '房间里的人比这个人数多，先请多出来的人离开。',
   'GAME_IN_PROGRESS': '这局还在进行，结束后再来。',
   'NOT_IN_ROOM': '你已不在这个房间。',
   'NOT_HOST': '只有房主可以这样做。',

@@ -416,7 +416,8 @@ export class MiniGameApp {
 
   private async createRoom(): Promise<void> {
     const deckCount = this.chosenDeckCount;
-    await this.openRoom(async (transport, nickname) => transport.call({ type: 'create', nickname, deckCount }));
+    const playerCount = this.chosenPlayerCount;
+    await this.openRoom(async (transport, nickname) => transport.call({ type: 'create', nickname, deckCount, playerCount }));
   }
 
   private async openRoom(open: (transport: RoomTransport, nickname: string) => Promise<RoomResponse>): Promise<void> {
@@ -472,6 +473,9 @@ export class MiniGameApp {
       return;
     }
     switch (action) {
+      case 'players-2': await online.setPlayerCount(2); return;
+      case 'players-3': await online.setPlayerCount(3); return;
+      case 'players-4': await online.setPlayerCount(4); return;
       case 'deck-1': await online.setDeckCount(1); return;
       case 'deck-2': await online.setDeckCount(2); return;
       case 'start-online': await online.start(); return;
